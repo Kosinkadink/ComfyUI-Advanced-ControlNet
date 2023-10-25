@@ -11,6 +11,14 @@ ControlNetWeightsType = list[float]
 T2IAdapterWeightsType = list[float]
 
 
+class StrengthInterpolation:
+    LINEAR = "linear"
+    EASE_IN = "ease-in"
+    EASE_OUT = "ease-out"
+    EASE_IN_OUT = "ease-in-out"
+    NONE = "none"
+
+
 class LatentKeyframe:
     def __init__(self, batch_index: int, strength: float) -> None:
         self.batch_index = batch_index
@@ -50,11 +58,15 @@ class LatentKeyframeGroup:
 class TimestepKeyframe:
     def __init__(self,
                  start_percent: float = 0.0,
+                 strength: float = 1.0,
+                 interpolation: str = StrengthInterpolation.LINEAR,
                  control_net_weights: ControlNetWeightsType = None,
                  t2i_adapter_weights: T2IAdapterWeightsType = None,
                  latent_keyframes: LatentKeyframeGroup = None,
                  default_latent_strength: float = 0.0) -> None:
         self.start_percent = start_percent
+        self.strength = strength
+        self.interpolation = interpolation
         self.control_net_weights = control_net_weights
         self.t2i_adapter_weights = t2i_adapter_weights
         self.latent_keyframes = latent_keyframes
@@ -229,7 +241,10 @@ class ControlNetAdvanced(ControlNet):
             self.mask_cond_hint = self.mask_cond_hint.to(self.control_model.dtype).to(self.device)
 
         context = cond['c_crossattn']
-        y = cond.get('c_adm', None)
+        # uses 'y' in new ComfyUI update
+        y = cond.get('y', None)
+        if y is None: # TODO: remove this in the future since no longer used by newest ComfyUI
+            y = cond.get('c_adm', None)
         if y is not None:
             y = y.to(self.control_model.dtype)
         control = self.control_model(x=x_noisy.to(self.control_model.dtype), hint=self.cond_hint, timesteps=t, context=context.to(self.control_model.dtype), y=y)

@@ -2,8 +2,9 @@ import numpy as np
 
 import folder_paths
 
-from .control import ControlNetAdvanced, T2IAdapterAdvanced, load_controlnet, ControlNetWeightsType, T2IAdapterWeightsType,\
+from .control import load_controlnet, ControlNetWeightsType, T2IAdapterWeightsType,\
     LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup, is_advanced_controlnet
+from .control import StrengthInterpolation as SI
 from .weight_nodes import ScaledSoftControlNetWeights, SoftControlNetWeights, CustomControlNetWeights, \
     SoftT2IAdapterWeights, CustomT2IAdapterWeights
 from .latent_keyframe_nodes import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
@@ -17,6 +18,9 @@ class TimestepKeyframeNode:
         return {
             "required": {
                 "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT, SI.NONE], ),
+                "default_latent_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
             },
             "optional": {
                 "control_net_weights": ("CONTROL_NET_WEIGHTS", ),
@@ -33,13 +37,17 @@ class TimestepKeyframeNode:
 
     def load_keyframe(self,
                       start_percent: float,
+                      strength: float,
+                      interpolation: str,
+                      default_latent_strength: float,
                       control_net_weights: ControlNetWeightsType=None,
                       t2i_adapter_weights: T2IAdapterWeightsType=None,
                       latent_keyframe: LatentKeyframeGroup=None,
                       prev_timestep_keyframe: TimestepKeyframeGroup=None):
         if not prev_timestep_keyframe:
             prev_timestep_keyframe = TimestepKeyframeGroup()
-        keyframe = TimestepKeyframe(start_percent, control_net_weights, t2i_adapter_weights, latent_keyframe)
+        keyframe = TimestepKeyframe(start_percent=start_percent, strength=strength, interpolation=interpolation, default_latent_strength=default_latent_strength,
+                                    control_net_weights=control_net_weights, t2i_adapter_weights=t2i_adapter_weights, latent_keyframes=latent_keyframe)
         prev_timestep_keyframe.add(keyframe)
         return (prev_timestep_keyframe,)
 

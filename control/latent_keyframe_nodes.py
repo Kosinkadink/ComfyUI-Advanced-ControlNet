@@ -3,6 +3,7 @@ import numpy as np
 from collections.abc import Iterable
 
 from .control import LatentKeyframe, LatentKeyframeGroup
+from .control import StrengthInterpolation as SI
 from .logger import logger
 
 
@@ -143,7 +144,7 @@ class LatentKeyframeInterpolationNode:
                 "batch_index_to_excl": ("INT", {"default": 0, "min": -10000, "max": 10000, "step": 1}),
                 "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.0001}, ),
                 "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.0001}, ),
-                "interpolation": (["linear", "ease-in", "ease-out", "ease-in-out"], ),
+                "interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT], ),
             },
             "optional": {
                 "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
@@ -174,15 +175,15 @@ class LatentKeyframeInterpolationNode:
 
         steps = batch_index_to_excl - batch_index_from
         diff = strength_to - strength_from
-        if interpolation == "linear":
+        if interpolation == SI.LINEAR:
             weights = np.linspace(strength_from, strength_to, steps)
-        elif interpolation == "ease-in":
+        elif interpolation == SI.EASE_IN:
             index = np.linspace(0, 1, steps)
             weights = diff * np.power(index, 2) + strength_from
-        elif interpolation == "ease-out":
+        elif interpolation == SI.EASE_OUT:
             index = np.linspace(0, 1, steps)
             weights = diff * (1 - np.power(1 - index, 2)) + strength_from
-        elif interpolation == "ease-in-out":
+        elif interpolation == SI.EASE_IN_OUT:
             index = np.linspace(0, 1, steps)
             weights = diff * ((1 - np.cos(index * np.pi)) / 2) + strength_from
 
