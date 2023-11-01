@@ -247,7 +247,10 @@ class ControlNetAdvanced(ControlNet):
             y = cond.get('c_adm', None)
         if y is not None:
             y = y.to(self.control_model.dtype)
-        control = self.control_model(x=x_noisy.to(self.control_model.dtype), hint=self.cond_hint, timesteps=t, context=context.to(self.control_model.dtype), y=y)
+        timestep = self.model_sampling_current.timestep(t)
+        x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
+
+        control = self.control_model(x=x_noisy.to(self.control_model.dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(self.control_model.dtype), y=y)
         return self.control_merge(None, control, control_prev, output_dtype)
 
     def apply_advanced_strengths_and_masks(self, x: Tensor, current_timestep_keyframe: TimestepKeyframe, batched_number: int):
