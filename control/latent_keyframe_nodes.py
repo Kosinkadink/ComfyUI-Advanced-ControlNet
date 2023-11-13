@@ -144,6 +144,7 @@ class LatentKeyframeInterpolationNode:
                 "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.0001}, ),
                 "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.0001}, ),
                 "interpolation": (["linear", "ease-in", "ease-out", "ease-in-out"], ),
+                "revert_direction_at_midpoint": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
@@ -160,7 +161,10 @@ class LatentKeyframeInterpolationNode:
                         batch_index_to_excl: int,
                         strength_to: float,
                         interpolation: str,
-                        prev_latent_keyframe: LatentKeyframeGroup=None):
+                        revert_direction_at_midpoint: bool=False,
+                        prev_latent_keyframe: LatentKeyframeGroup=None
+                        ):
+
 
         if (batch_index_from > batch_index_to_excl):
             raise ValueError("batch_index_from must be less than or equal to batch_index_to.")
@@ -174,17 +178,23 @@ class LatentKeyframeInterpolationNode:
 
         steps = batch_index_to_excl - batch_index_from
         diff = strength_to - strength_from
-        if interpolation == "linear":
-            weights = np.linspace(strength_from, strength_to, steps)
-        elif interpolation == "ease-in":
+
+        if revert_direction_at_midpoint:
+            index = np.linspace(0, 1, steps // 2 + 1)
+        else:
             index = np.linspace(0, 1, steps)
+
+        if interpolation == "linear":
+            weights = np.linspace(strength_from, strength_to, len(index))
+        elif interpolation == "ease-in":
             weights = diff * np.power(index, 2) + strength_from
         elif interpolation == "ease-out":
-            index = np.linspace(0, 1, steps)
             weights = diff * (1 - np.power(1 - index, 2)) + strength_from
         elif interpolation == "ease-in-out":
-            index = np.linspace(0, 1, steps)
             weights = diff * ((1 - np.cos(index * np.pi)) / 2) + strength_from
+
+        if revert_direction_at_midpoint:
+            weights = np.concatenate([weights, weights[-2::-1]])
 
         for i in range(steps):
             keyframe = LatentKeyframe(batch_index_from + i, float(weights[i]))
