@@ -140,7 +140,7 @@ class AdvancedControlNetApply:
                 if prev_cnet in cnets:
                     c_net = cnets[prev_cnet]
                 else:
-                    c_net = control_net.copy().set_cond_hint(control_hint, strength, (1.0 - start_percent, 1.0 - end_percent))
+                    c_net = control_net.copy().set_cond_hint(control_hint, strength, (start_percent, end_percent))
                     # set cond hint mask
                     if mask_optional is not None:
                         if is_advanced_controlnet(c_net):
