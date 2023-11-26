@@ -46,6 +46,7 @@ class LatentKeyframeGroupNode:
             "optional": {
                 "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
                 "latent_optional": ("LATENT", ),
+                "print_keyframes": ("BOOLEAN", {"default": False})
             }
         }
     
@@ -81,7 +82,7 @@ class LatentKeyframeGroupNode:
     def convert_to_latent_keyframes(self, latent_indeces: str, latent_count: int) -> set[LatentKeyframe]:
         if not latent_indeces:
             return set()
-        all_indeces = [i for i in range(0, latent_count)]
+        int_latent_indeces = [i for i in range(0, latent_count)]
         allow_negative = latent_count > 0
         chosen_indeces = set()
         # parse string - allow positive ints, negative ints, and ranges separated by ':'
@@ -105,8 +106,14 @@ class LatentKeyframeGroupNode:
                 index_range = [r.strip() for r in index_range]
                 start_index = self.convert_to_index_int(index_range[0], latent_count=latent_count, is_range=True, allow_negative=allow_negative)
                 end_index = self.convert_to_index_int(index_range[1], latent_count=latent_count, is_range=True, allow_negative=allow_negative)
-                for i in all_indeces[start_index:end_index]:
-                    chosen_indeces.add(LatentKeyframe(i, strength))
+                # if latents were passed in, base indeces on known latent count
+                if len(int_latent_indeces) > 0:
+                    for i in int_latent_indeces[start_index:end_index]:
+                        chosen_indeces.add(LatentKeyframe(i, strength))
+                # otherwise, assume indeces are valid
+                else:
+                    for i in range(start_index, end_index):
+                        chosen_indeces.add(LatentKeyframe(i, strength))
             # parse individual indeces
             else:
                 chosen_indeces.add(LatentKeyframe(self.convert_to_index_int(g, latent_count=latent_count, allow_negative=allow_negative), strength))
@@ -115,7 +122,8 @@ class LatentKeyframeGroupNode:
     def load_keyframes(self,
                        index_strengths: str,
                        prev_latent_keyframe: LatentKeyframeGroup=None,
-                       latent_image_opt=None):
+                       latent_image_opt=None,
+                       print_keyframes=False):
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
         curr_latent_keyframe = LatentKeyframeGroup()
@@ -126,9 +134,13 @@ class LatentKeyframeGroupNode:
         latent_keyframes = self.convert_to_latent_keyframes(index_strengths, latent_count=latent_count)
 
         for latent_keyframe in latent_keyframes:
-            logger.info(f"keyframe {latent_keyframe.batch_index}:{latent_keyframe.strength}")
             curr_latent_keyframe.add(latent_keyframe)
         
+        if print_keyframes:
+            for keyframe in curr_latent_keyframe.keyframes:
+                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
+
+        # replace values with prev_latent_keyframes
         for latent_keyframe in prev_latent_keyframe.keyframes:
             curr_latent_keyframe.add(latent_keyframe)
 
@@ -148,6 +160,7 @@ class LatentKeyframeInterpolationNode:
             },
             "optional": {
                 "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
+                "print_keyframes": ("BOOLEAN", {"default": False})
             }
         }
 
@@ -161,7 +174,8 @@ class LatentKeyframeInterpolationNode:
                         batch_index_to_excl: int,
                         strength_to: float,
                         interpolation: str,
-                        prev_latent_keyframe: LatentKeyframeGroup=None):
+                        prev_latent_keyframe: LatentKeyframeGroup=None,
+                        print_keyframes=False):
 
         if (batch_index_from > batch_index_to_excl):
             raise ValueError("batch_index_from must be less than or equal to batch_index_to.")
@@ -189,8 +203,11 @@ class LatentKeyframeInterpolationNode:
 
         for i in range(steps):
             keyframe = LatentKeyframe(batch_index_from + i, float(weights[i]))
-            logger.info(f"keyframe {batch_index_from + i}:{weights[i]}")
             curr_latent_keyframe.add(keyframe)
+        
+        if print_keyframes:
+            for keyframe in curr_latent_keyframe.keyframes:
+                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
 
         # replace values with prev_latent_keyframes
         for latent_keyframe in prev_latent_keyframe.keyframes:
@@ -204,10 +221,11 @@ class LatentKeyframeBatchedGroupNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.0001}),
+                "float_strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.0001, "forceInput": True}),
             },
             "optional": {
                 "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
+                "print_keyframes": ("BOOLEAN", {"default": False})
             }
         }
 
@@ -215,22 +233,25 @@ class LatentKeyframeBatchedGroupNode:
     FUNCTION = "load_keyframe"
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
 
-    def load_keyframe(self, strengths: Union[float, list[float]], prev_latent_keyframe: LatentKeyframeGroup=None):
+    def load_keyframe(self, float_strengths: Union[float, list[float]], prev_latent_keyframe: LatentKeyframeGroup=None, print_keyframes=False):
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
         curr_latent_keyframe = LatentKeyframeGroup()
 
         # if received a normal float input, do nothing
-        if type(strengths) in (float, int):
-            logger.info("No batched strengths passed into Latent Keyframe Batch Group node; will not create any new keyframes.")
+        if type(float_strengths) in (float, int):
+            logger.info("No batched float_strengths passed into Latent Keyframe Batch Group node; will not create any new keyframes.")
         # if iterable, attempt to create LatentKeyframes with chosen strengths
-        elif isinstance(strengths, Iterable):
-            for idx, strength in enumerate(strengths):
+        elif isinstance(float_strengths, Iterable):
+            for idx, strength in enumerate(float_strengths):
                 keyframe = LatentKeyframe(idx, strength)
                 curr_latent_keyframe.add(keyframe)
-                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
         else:
-            raise ValueError(f"Expected strengths to be an iterable input, but was {type(strengths).__repr__}.")    
+            raise ValueError(f"Expected strengths to be an iterable input, but was {type(float_strengths).__repr__}.")    
+
+        if print_keyframes:
+            for keyframe in curr_latent_keyframe.keyframes:
+                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
 
         # replace values with prev_latent_keyframes
         for latent_keyframe in prev_latent_keyframe.keyframes:

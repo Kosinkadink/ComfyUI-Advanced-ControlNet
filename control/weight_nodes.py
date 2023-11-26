@@ -11,6 +11,28 @@ def get_properly_arranged_t2i_weights(initial_weights: list[float]):
     return new_weights
 
 
+class ScaledSoftControlLoraWeights:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "flip_weights": ("BOOLEAN", {"default": False}),
+            },
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    FUNCTION = "load_weights"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
+
+    def load_weights(self, base_multiplier, flip_weights):
+        weights = [(base_multiplier ** float(9 - i)) for i in range(10)]
+        if flip_weights:
+            weights.reverse()
+        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_net_weights=weights)))
+
+
 class ScaledSoftControlNetWeights:
     @classmethod
     def INPUT_TYPES(s):

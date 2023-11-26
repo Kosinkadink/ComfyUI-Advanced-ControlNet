@@ -5,7 +5,7 @@ import folder_paths
 from .control import load_controlnet, ControlNetWeightsType, T2IAdapterWeightsType,\
     LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup, is_advanced_controlnet
 from .control import StrengthInterpolation as SI
-from .weight_nodes import ScaledSoftControlNetWeights, SoftControlNetWeights, CustomControlNetWeights, \
+from .weight_nodes import ScaledSoftControlLoraWeights, ScaledSoftControlNetWeights, SoftControlNetWeights, CustomControlNetWeights, \
     SoftT2IAdapterWeights, CustomT2IAdapterWeights
 from .latent_keyframe_nodes import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
 from .deprecated_nodes import LoadImagesFromDirectory
@@ -140,6 +140,7 @@ class AdvancedControlNetApply:
                 if prev_cnet in cnets:
                     c_net = cnets[prev_cnet]
                 else:
+                    # TODO: attempt to convert to Advanced versions
                     c_net = control_net.copy().set_cond_hint(control_hint, strength, (start_percent, end_percent))
                     # set cond hint mask
                     if mask_optional is not None:
@@ -178,6 +179,7 @@ NODE_CLASS_MAPPINGS = {
     "CustomControlNetWeights": CustomControlNetWeights,
     "SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
+    "ScaledSoftControlLoraWeights": ScaledSoftControlLoraWeights,
     # Image
     "LoadImagesFromDirectory": LoadImagesFromDirectory
 }
@@ -200,6 +202,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CustomControlNetWeights": "Custom ControlNet Weights 🛂🅐🅒🅝",
     "SoftT2IAdapterWeights": "Soft T2IAdapter Weights 🛂🅐🅒🅝",
     "CustomT2IAdapterWeights": "Custom T2IAdapter Weights 🛂🅐🅒🅝",
+    "ScaledSoftControlLoraWeights": "Scaled Soft ControlLora Weights 🛂🅐🅒🅝",
     # Image
     "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝"
 }
