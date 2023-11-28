@@ -2,10 +2,10 @@ import numpy as np
 
 import folder_paths
 
-from .control import load_controlnet, ControlNetWeightsType, T2IAdapterWeightsType,\
+from .control import load_controlnet, convert_to_advanced, ControlWeights, ControlWeightType,\
     LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup, is_advanced_controlnet
 from .control import StrengthInterpolation as SI
-from .weight_nodes import ScaledSoftControlLoraWeights, ScaledSoftControlNetWeights, SoftControlNetWeights, CustomControlNetWeights, \
+from .weight_nodes import DefaultWeights, ScaledSoftControlLoraWeights, ScaledSoftControlNetWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights, \
     SoftT2IAdapterWeights, CustomT2IAdapterWeights
 from .latent_keyframe_nodes import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
 from .deprecated_nodes import LoadImagesFromDirectory
@@ -19,17 +19,19 @@ class TimestepKeyframeNode:
             "required": {
                 "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT, SI.NONE], ),
-                "default_latent_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
             },
             "optional": {
                 "control_net_weights": ("CONTROL_NET_WEIGHTS", ),
-                "t2i_adapter_weights": ("T2I_ADAPTER_WEIGHTS", ),
                 "latent_keyframe": ("LATENT_KEYFRAME", ),
                 "prev_timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
+                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "inherit_missing": ("BOOLEAN", {"default": True}, ),
+                "guarantee_usage": ("BOOLEAN", {"default": True}, ),
+                #"interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT, SI.NONE], {"default": SI.NONE}, ),
             }
         }
     
+    RETURN_NAMES = ("TIMESTEP_KF", )
     RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
     FUNCTION = "load_keyframe"
 
@@ -38,16 +40,17 @@ class TimestepKeyframeNode:
     def load_keyframe(self,
                       start_percent: float,
                       strength: float,
-                      interpolation: str,
-                      default_latent_strength: float,
-                      control_net_weights: ControlNetWeightsType=None,
-                      t2i_adapter_weights: T2IAdapterWeightsType=None,
+                      control_net_weights: ControlWeights=None,
                       latent_keyframe: LatentKeyframeGroup=None,
-                      prev_timestep_keyframe: TimestepKeyframeGroup=None):
+                      prev_timestep_keyframe: TimestepKeyframeGroup=None,
+                      null_latent_kf_strength: float=0.0,
+                      inherit_missing=True,
+                      guarantee_usage=True,
+                      interpolation: str=SI.NONE,):
         if not prev_timestep_keyframe:
             prev_timestep_keyframe = TimestepKeyframeGroup()
-        keyframe = TimestepKeyframe(start_percent=start_percent, strength=strength, interpolation=interpolation, default_latent_strength=default_latent_strength,
-                                    control_net_weights=control_net_weights, t2i_adapter_weights=t2i_adapter_weights, latent_keyframes=latent_keyframe)
+        keyframe = TimestepKeyframe(start_percent=start_percent, strength=strength, interpolation=interpolation, null_latent_kf_strength=null_latent_kf_strength,
+                                    control_weights=control_net_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing, guarantee_usage=guarantee_usage)
         prev_timestep_keyframe.add(keyframe)
         return (prev_timestep_keyframe,)
 
@@ -63,11 +66,11 @@ class ControlNetLoaderAdvanced:
                 "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
             }
         }
-    
+
     RETURN_TYPES = ("CONTROL_NET", )
     FUNCTION = "load_controlnet"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/loaders"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def load_controlnet(self, control_net_name, timestep_keyframe: TimestepKeyframeGroup=None):
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
@@ -91,9 +94,9 @@ class DiffControlNetLoaderAdvanced:
     RETURN_TYPES = ("CONTROL_NET", )
     FUNCTION = "load_controlnet"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/loaders"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
-    def load_controlnet(self, control_net_name, timestep_keyframe: TimestepKeyframeGroup, model):
+    def load_controlnet(self, control_net_name, model, timestep_keyframe: TimestepKeyframeGroup=None):
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = load_controlnet(controlnet_path, timestep_keyframe, model)
         return (controlnet,)
@@ -114,6 +117,9 @@ class AdvancedControlNetApply:
             },
             "optional": {
                 "mask_optional": ("MASK", ),
+                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "latent_kf_override": ("LATENT_KEYFRAME", ),
+                "cn_weights_override": ("CONTROL_NET_WEIGHTS", ),
             }
         }
 
@@ -121,9 +127,12 @@ class AdvancedControlNetApply:
     RETURN_NAMES = ("positive", "negative")
     FUNCTION = "apply_controlnet"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/conditioning"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
-    def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent, mask_optional=None):
+    def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent,
+                         mask_optional=None,
+                         timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
+                         weights_override: ControlWeights=None):
         if strength == 0:
             return (positive, negative)
 
@@ -140,11 +149,18 @@ class AdvancedControlNetApply:
                 if prev_cnet in cnets:
                     c_net = cnets[prev_cnet]
                 else:
-                    # TODO: attempt to convert to Advanced versions
-                    c_net = control_net.copy().set_cond_hint(control_hint, strength, (start_percent, end_percent))
-                    # set cond hint mask
-                    if mask_optional is not None:
-                        if is_advanced_controlnet(c_net):
+                    # copy, convert to advanced if needed, and set cond
+                    c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent))
+                    if is_advanced_controlnet(c_net):
+                        # apply optional parameters and overrides, if provided
+                        if timestep_kf is not None:
+                            c_net.set_timestep_keyframes(timestep_kf)
+                        if latent_kf_override is not None:
+                            c_net.latent_keyframe_override = latent_kf_override
+                        if weights_override is not None:
+                            c_net.weights_override = weights_override
+                        # set cond hint mask
+                        if mask_optional is not None:
                             # if not in the form of a batch, make it so
                             if len(mask_optional.shape) < 3:
                                 mask_optional = mask_optional.unsqueeze(0)
@@ -168,18 +184,20 @@ NODE_CLASS_MAPPINGS = {
     "LatentKeyframeGroup": LatentKeyframeGroupNode,
     "LatentKeyframeBatchedGroup": LatentKeyframeBatchedGroupNode,
     "LatentKeyframeTiming": LatentKeyframeInterpolationNode,
+    # Conditioning
+    "ACN_AdvancedControlNetApply": AdvancedControlNetApply,
     # Loaders
     "ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
     "DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
-    # Conditioning
-    "ACN_AdvancedControlNetApply": AdvancedControlNetApply,
     # Weights
+    "ScaledSoftUniversalWeights": ScaledSoftUniversalWeights,
     "ScaledSoftControlNetWeights": ScaledSoftControlNetWeights,
     "SoftControlNetWeights": SoftControlNetWeights,
     "CustomControlNetWeights": CustomControlNetWeights,
     "SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ScaledSoftControlLoraWeights": ScaledSoftControlLoraWeights,
+    "ACN_DefaultUniversalWeights": DefaultWeights,
     # Image
     "LoadImagesFromDirectory": LoadImagesFromDirectory
 }
@@ -191,18 +209,20 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LatentKeyframeGroup": "Latent Keyframe Group 🛂🅐🅒🅝",
     "LatentKeyframeBatchedGroup": "Latent Keyframe Batched Group 🛂🅐🅒🅝",
     "LatentKeyframeTiming": "Latent Keyframe Interpolation 🛂🅐🅒🅝",
+    # Conditioning
+    "ACN_AdvancedControlNetApply": "Apply Advanced ControlNet 🛂🅐🅒🅝",
     # Loaders
     "ControlNetLoaderAdvanced": "Load ControlNet Model (Advanced) 🛂🅐🅒🅝",
     "DiffControlNetLoaderAdvanced": "Load ControlNet Model (diff Advanced) 🛂🅐🅒🅝",
-    # Conditioning
-    "ACN_AdvancedControlNetApply": "Apply Advanced ControlNet 🛂🅐🅒🅝",
     # Weights
-    "ScaledSoftControlNetWeights": "Scaled Soft ControlNet Weights 🛂🅐🅒🅝",
-    "SoftControlNetWeights": "Soft ControlNet Weights 🛂🅐🅒🅝",
-    "CustomControlNetWeights": "Custom ControlNet Weights 🛂🅐🅒🅝",
-    "SoftT2IAdapterWeights": "Soft T2IAdapter Weights 🛂🅐🅒🅝",
-    "CustomT2IAdapterWeights": "Custom T2IAdapter Weights 🛂🅐🅒🅝",
-    "ScaledSoftControlLoraWeights": "Scaled Soft ControlLora Weights 🛂🅐🅒🅝",
+    "ScaledSoftUniversalWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
+    "ScaledSoftControlNetWeights": "ControlNet Scaled Soft Weights 🛂🅐🅒🅝",
+    "SoftControlNetWeights": "ControlNet Soft Weights 🛂🅐🅒🅝",
+    "CustomControlNetWeights": "ControlNet Custom Weights 🛂🅐🅒🅝",
+    "SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
+    "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
+    "ScaledSoftControlLoraWeights": "ControlLora Scaled Soft Weights 🛂🅐🅒🅝",
+    "ACN_DefaultUniversalWeights": "Force Default Weights 🛂🅐🅒🅝",
     # Image
     "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝"
 }
