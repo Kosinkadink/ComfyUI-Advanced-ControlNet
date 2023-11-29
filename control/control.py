@@ -254,6 +254,21 @@ class AdvancedControlBase:
     def add_compatible_weight(self, control_weight_type: str):
         self.compatible_weights.append(control_weight_type)
 
+    def verify_all_weights(self, throw_error=True):
+        # first, check if override exists - if so, only need to check the override
+        if self.weights_override is not None:
+            if self.weights_override.weight_type not in self.compatible_weights:
+                msg = f"Weight override is type {self.weights_override.weight_type}, but loaded {type(self).__name__}" + \
+                    f"only supports {self.compatible_weights} weights."
+                raise WeightTypeException(msg)
+        # otherwise, check all timestep keyframe weights
+        else:
+            for tk in self.timestep_keyframes.keyframes:
+                if tk.has_control_weights() and tk.control_weights.weight_type not in self.compatible_weights:
+                    msg = f"Weight on Timestep Keyframe with start_percent={tk.start_percent} is type" + \
+                        f"{tk.control_weights.weight_type}, but loaded {type(self).__name__} only supports {self.compatible_weights} weights."
+                    raise WeightTypeException(msg)
+
     def set_timestep_keyframes(self, timestep_keyframes: TimestepKeyframeGroup):
         self.timestep_keyframes = timestep_keyframes if timestep_keyframes else TimestepKeyframeGroup()
         # prepare first timestep_keyframe related stuff
@@ -360,8 +375,11 @@ class AdvancedControlBase:
             # prepare weight mask
             self.prepare_weight_mask_cond_hint(x, self.batched_number)
             # adjust mask for current layer and return
-            return torch.pow(self.weight_mask_cond_hint, (layers-1)-idx) 
+            return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, layers=layers))
         return self.weights.get(idx=idx)
+    
+    def get_calc_pow(self, idx: int, layers: int) -> int:
+        return (layers-1)-idx
 
     def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
         # apply strengths, and get batch indeces to null out
@@ -547,7 +565,6 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(12 - i)) for i in range(13)]
-        # TODO: account for masks?
         return ControlWeights.controlnet(raw_weights, self.weights.flip_weights)
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
@@ -619,8 +636,14 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         raw_weights = [(self.weights.base_multiplier ** float(7 - i)) for i in range(8)]
         raw_weights = [raw_weights[-8], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
         raw_weights = get_properly_arranged_t2i_weights(raw_weights)
-        # TODO: account for masks?
         return ControlWeights.t2iadapter(raw_weights, self.weights.flip_weights)
+
+    def get_calc_pow(self, idx: int, layers: int) -> int:
+        # match how T2IAdapterAdvanced deals with universal weights
+        indeces = [7 - i for i in range(8)]
+        indeces = [indeces[-8], indeces[-3], indeces[-2], indeces[-1]]
+        indeces = get_properly_arranged_t2i_weights(indeces)
+        return indeces[idx]
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
         # prepare timestep and everything related
@@ -667,7 +690,6 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
     
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(9 - i)) for i in range(10)]
-        # TODO: account for masks?
         return ControlWeights.controllora(raw_weights, self.weights.flip_weights)
 
     def copy(self):
@@ -741,3 +763,8 @@ def normalize_min_max(x: Tensor, new_min = 0.0, new_max = 1.0):
 
 def linear_conversion(x, x_min=0.0, x_max=1.0, new_min=0.0, new_max=1.0):
     return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
+
+
+class WeightTypeException(TypeError):
+    "Raised when weight not compatible with AdvancedControlBase object"
+    pass

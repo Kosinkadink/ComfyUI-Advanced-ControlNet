@@ -1,4 +1,5 @@
 from torch import Tensor
+import torch
 from .control import TimestepKeyframe, TimestepKeyframeGroup, ControlWeights, get_properly_arranged_t2i_weights, linear_conversion
 from .logger import logger
 
@@ -47,7 +48,10 @@ class ScaledSoftMaskedUniversalWeights:
         mask = mask.clone()
         x_min = 0.0 if lock_min else mask.min()
         x_max = 1.0 if lock_max else mask.max()
-        mask = linear_conversion(mask, x_min, x_max, min_base_multiplier, max_base_multiplier)
+        if x_min == x_max:
+            mask = torch.ones_like(mask) * max_base_multiplier
+        else:
+            mask = linear_conversion(mask, x_min, x_max, min_base_multiplier, max_base_multiplier)
         weights = ControlWeights.universal_mask(weight_mask=mask)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 

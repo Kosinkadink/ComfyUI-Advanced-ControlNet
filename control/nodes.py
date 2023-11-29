@@ -105,6 +105,8 @@ class DiffControlNetLoaderAdvanced:
     def load_controlnet(self, control_net_name, model, timestep_keyframe: TimestepKeyframeGroup=None):
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = load_controlnet(controlnet_path, timestep_keyframe, model)
+        if is_advanced_controlnet(controlnet):
+            controlnet.verify_all_weights()
         return (controlnet,)
 
 
@@ -165,6 +167,8 @@ class AdvancedControlNetApply:
                             c_net.latent_keyframe_override = latent_kf_override
                         if weights_override is not None:
                             c_net.weights_override = weights_override
+                        # verify weights are compatible
+                        c_net.verify_all_weights()
                         # set cond hint mask
                         if mask_optional is not None:
                             mask_optional = mask_optional.clone()
