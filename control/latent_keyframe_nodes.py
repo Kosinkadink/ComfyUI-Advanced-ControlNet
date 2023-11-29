@@ -31,6 +31,8 @@ class LatentKeyframeNode:
                       prev_latent_keyframe: LatentKeyframeGroup=None):
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
+        else:
+            prev_latent_keyframe = prev_latent_keyframe.clone()
         keyframe = LatentKeyframe(batch_index, strength)
         prev_latent_keyframe.add(keyframe)
         return (prev_latent_keyframe,)
@@ -126,6 +128,8 @@ class LatentKeyframeGroupNode:
                        print_keyframes=False):
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
+        else:
+            prev_latent_keyframe = prev_latent_keyframe.clone()
         curr_latent_keyframe = LatentKeyframeGroup()
 
         latent_count = -1
@@ -185,6 +189,8 @@ class LatentKeyframeInterpolationNode:
 
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
+        else:
+            prev_latent_keyframe = prev_latent_keyframe.clone()
         curr_latent_keyframe = LatentKeyframeGroup()
 
         steps = batch_index_to_excl - batch_index_from
@@ -236,6 +242,8 @@ class LatentKeyframeBatchedGroupNode:
     def load_keyframe(self, float_strengths: Union[float, list[float]], prev_latent_keyframe: LatentKeyframeGroup=None, print_keyframes=False):
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
+        else:
+            prev_latent_keyframe = prev_latent_keyframe.clone()
         curr_latent_keyframe = LatentKeyframeGroup()
 
         # if received a normal float input, do nothing

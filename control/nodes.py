@@ -27,6 +27,7 @@ class TimestepKeyframeNode:
                 "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "inherit_missing": ("BOOLEAN", {"default": True}, ),
                 "guarantee_usage": ("BOOLEAN", {"default": True}, ),
+                "mask_optional": ("MASK", ),
                 #"interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT, SI.NONE], {"default": SI.NONE}, ),
             }
         }
@@ -46,11 +47,15 @@ class TimestepKeyframeNode:
                       null_latent_kf_strength: float=0.0,
                       inherit_missing=True,
                       guarantee_usage=True,
+                      mask_optional=None,
                       interpolation: str=SI.NONE,):
         if not prev_timestep_keyframe:
             prev_timestep_keyframe = TimestepKeyframeGroup()
+        else:
+            prev_timestep_keyframe = prev_timestep_keyframe.clone()
         keyframe = TimestepKeyframe(start_percent=start_percent, strength=strength, interpolation=interpolation, null_latent_kf_strength=null_latent_kf_strength,
-                                    control_weights=control_net_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing, guarantee_usage=guarantee_usage)
+                                    control_weights=control_net_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing, guarantee_usage=guarantee_usage,
+                                    mask_hint_orig=mask_optional)
         prev_timestep_keyframe.add(keyframe)
         return (prev_timestep_keyframe,)
 
