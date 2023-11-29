@@ -1,5 +1,9 @@
-from .control import TimestepKeyframe, TimestepKeyframeGroup, ControlWeights, get_properly_arranged_t2i_weights
+from torch import Tensor
+from .control import TimestepKeyframe, TimestepKeyframeGroup, ControlWeights, get_properly_arranged_t2i_weights, linear_conversion
 from .logger import logger
+
+
+WEIGHTS_RETURN_NAMES = ("CONTROL_NET_WEIGHTS", "TK_SHORTCUT")
 
 
 class DefaultWeights:
@@ -9,6 +13,7 @@ class DefaultWeights:
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
     FUNCTION = "load_weights"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
@@ -18,17 +23,47 @@ class DefaultWeights:
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights))) 
 
 
+class ScaledSoftMaskedUniversalWeights:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mask": ("MASK", ),
+                "min_base_multiplier": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
+                "max_base_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
+                #"lock_min": ("BOOLEAN", {"default": False}, ),
+                #"lock_max": ("BOOLEAN", {"default": False}, ),
+            },
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
+    FUNCTION = "load_weights"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
+
+    def load_weights(self, mask: Tensor, min_base_multiplier: float, max_base_multiplier: float, lock_min=False, lock_max=False):
+        # normalize mask
+        mask = mask.clone()
+        x_min = 0.0 if lock_min else mask.min()
+        x_max = 1.0 if lock_max else mask.max()
+        mask = linear_conversion(mask, x_min, x_max, min_base_multiplier, max_base_multiplier)
+        weights = ControlWeights.universal_mask(weight_mask=mask)
+        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
+
+
 class ScaledSoftUniversalWeights:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 1.0, "step": 0.001}, ),
                 "flip_weights": ("BOOLEAN", {"default": False}),
             },
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
     FUNCTION = "load_weights"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
@@ -36,48 +71,6 @@ class ScaledSoftUniversalWeights:
     def load_weights(self, base_multiplier, flip_weights):
         weights = ControlWeights.universal(base_multiplier=base_multiplier, flip_weights=flip_weights)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights))) 
-
-
-class ScaledSoftControlLoraWeights:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "flip_weights": ("BOOLEAN", {"default": False}),
-            },
-        }
-    
-    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
-    FUNCTION = "load_weights"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlLoRA"
-
-    def load_weights(self, base_multiplier, flip_weights):
-        weights = [(base_multiplier ** float(9 - i)) for i in range(10)]
-        weights = ControlWeights.controllora(weights, flip_weights=flip_weights)
-        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
-
-
-class ScaledSoftControlNetWeights:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "flip_weights": ("BOOLEAN", {"default": False}),
-            },
-        }
-    
-    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
-    FUNCTION = "load_weights"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
-
-    def load_weights(self, base_multiplier, flip_weights):
-        weights = [(base_multiplier ** float(12 - i)) for i in range(13)]
-        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights)
-        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
 class SoftControlNetWeights:
@@ -103,6 +96,7 @@ class SoftControlNetWeights:
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
     FUNCTION = "load_weights"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
@@ -138,6 +132,7 @@ class CustomControlNetWeights:
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
     FUNCTION = "load_weights"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
@@ -164,6 +159,7 @@ class SoftT2IAdapterWeights:
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
     FUNCTION = "load_weights"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/T2IAdapter"
@@ -189,6 +185,7 @@ class CustomT2IAdapterWeights:
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
     FUNCTION = "load_weights"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/T2IAdapter"

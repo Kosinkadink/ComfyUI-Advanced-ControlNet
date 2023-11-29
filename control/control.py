@@ -35,11 +35,7 @@ class ControlWeights:
             self.weights.reverse()
         self.weight_mask = weight_mask
 
-    def get(self, idx: int, shape: Tensor) -> Union[float, Tensor]:
-        # if weight_mask present, return normalized mask
-        if self.base_multiplier != 1.0 and self.weight_mask is not None:
-            # TODO: fill out
-            pass 
+    def get(self, idx: int) -> Union[float, Tensor]:
         # if weights is not none, return index
         if self.weights is not None:
             return self.weights[idx]
@@ -53,6 +49,10 @@ class ControlWeights:
     def universal(cls, base_multiplier: float, flip_weights: bool=False):
         return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights)
     
+    @classmethod
+    def universal_mask(cls, weight_mask: Tensor):
+        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask)
+
     @classmethod
     def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False):
         if weights is None:
@@ -268,7 +268,6 @@ class AdvancedControlBase:
         self.batched_number = batched_number
         # get current step percent
         curr_t: float = t[0]
-        print(f"$$$$ {curr_t}")
         prev_index = self.current_timestep_index
         # if has next index, loop through and see if need to switch
         if self.timestep_keyframes.has_index(self.current_timestep_index+1):
@@ -278,7 +277,8 @@ class AdvancedControlBase:
                 if eval_tk.start_t >= curr_t:
                     self.current_timestep_index = i
                     self.current_timestep_keyframe = eval_tk
-                    # keep track of weights and control weights, accounting for inherit_missing
+                    # keep track of control weights, latent keyframes, and masks,
+                    # accounting for inherit_missing
                     if self.current_timestep_keyframe.has_control_weights():
                         self.weights = self.current_timestep_keyframe.control_weights
                     elif not self.current_timestep_keyframe.inherit_missing:
@@ -314,6 +314,9 @@ class AdvancedControlBase:
         if self.weights is None or self.weights.weight_type == ControlWeightType.DEFAULT:
             self.weights = self.weights_default
         elif self.weights.weight_type == ControlWeightType.UNIVERSAL:
+            # if universal and weight_mask present, no need to convert
+            if self.weights.weight_mask is not None:
+                return
             self.weights = self.get_universal_weights()
     
     def get_universal_weights(self) -> ControlWeights:
@@ -352,6 +355,14 @@ class AdvancedControlBase:
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
         pass
 
+    def calc_weight(self, idx: int, x: Tensor, layers: int) -> Union[float, Tensor]:
+        if self.weights.weight_mask is not None:
+            # prepare weight mask
+            self.prepare_weight_mask_cond_hint(x, self.batched_number)
+            # adjust mask for current layer and return
+            return torch.pow(self.weight_mask_cond_hint, (layers-1)-idx) 
+        return self.weights.get(idx=idx)
+
     def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
         # apply strengths, and get batch indeces to null out
         # AKA latents that should not be influenced by ControlNet
@@ -380,6 +391,10 @@ class AdvancedControlBase:
                     if real_index is None:
                         continue
                     indeces_to_null.remove(real_index)
+
+                # if real_index is outside the bounds of latents, don't apply
+                if real_index >= latent_count or real_index < 0:
+                    continue
 
                 # apply strength for each batched cond/uncond
                 for b in range(batched_number):
@@ -411,7 +426,7 @@ class AdvancedControlBase:
                 if x is not None:
                     self.apply_advanced_strengths_and_masks(x, self.batched_number)
 
-                    x *= self.strength * self.weights.get(i, x.shape)
+                    x *= self.strength * self.calc_weight(i, x, len(control_input))
                     if x.dtype != output_dtype:
                         x = x.to(output_dtype)
                 out[key].insert(0, x)
@@ -431,7 +446,7 @@ class AdvancedControlBase:
                     if self.global_average_pooling:
                         x = torch.mean(x, dim=(2, 3), keepdim=True).repeat(1, 1, x.shape[2], x.shape[3])
 
-                    x *= self.strength * self.weights.get(i, x.shape)
+                    x *= self.strength * self.calc_weight(i, x, len(control_output))
                     if x.dtype != output_dtype:
                         x = x.to(output_dtype)
 
@@ -451,36 +466,17 @@ class AdvancedControlBase:
         return out
 
     def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
-        # make mask appropriate dimensions, if present
-        if self.mask_cond_hint_original is not None:
-            if self.sub_idxs is not None or self.mask_cond_hint is None or x_noisy.shape[2] * 8 != self.mask_cond_hint.shape[1] or x_noisy.shape[3] * 8 != self.mask_cond_hint.shape[2]:
-                if self.mask_cond_hint is not None:
-                    del self.mask_cond_hint
-                self.mask_cond_hint = None
-                # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
-                # resize mask and match batch count
-                self.mask_cond_hint = prepare_mask_batch(self.mask_cond_hint_original, x_noisy.shape, multiplier=8)
-                actual_latent_length = x_noisy.shape[0] // batched_number
-                self.mask_cond_hint = comfy.utils.repeat_to_batch_size(self.mask_cond_hint, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
-                if self.sub_idxs is not None:
-                    self.mask_cond_hint = self.mask_cond_hint[self.sub_idxs]
-            # make cond_hint_mask length match x_noise
-            if x_noisy.shape[0] != self.mask_cond_hint.shape[0]:
-                self.mask_cond_hint = broadcast_image_to(self.mask_cond_hint, x_noisy.shape[0], batched_number)
-            # default dtype to be same as x_noisy
-            if dtype is None:
-                dtype = x_noisy.dtype
-            self.mask_cond_hint = self.mask_cond_hint.to(dtype=dtype).to(self.device)
-        # prepare other masks
+        self._prepare_mask("mask_cond_hint", self.mask_cond_hint_original, x_noisy, t, cond, batched_number, dtype)
         self.prepare_tk_mask_cond_hint(x_noisy, t, cond, batched_number, dtype)
 
     def prepare_tk_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
         return self._prepare_mask("tk_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype)
 
-    def prepare_weight_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
-        return self._prepare_mask("weight_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype)
+    def prepare_weight_mask_cond_hint(self, x_noisy: Tensor, batched_number, dtype=None):
+        return self._prepare_mask("weight_mask_cond_hint", self.weights.weight_mask, x_noisy, t=None, cond=None, batched_number=batched_number, dtype=dtype, direct_attn=True)
 
-    def _prepare_mask(self, attr_name, orig_mask: Tensor, x_noisy: Tensor, t, cond, batched_number, dtype=None):
+    def _prepare_mask(self, attr_name, orig_mask: Tensor, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
+        # make mask appropriate dimensions, if present
         if orig_mask is not None:
             out_mask = getattr(self, attr_name)
             if self.sub_idxs is not None or out_mask is None or x_noisy.shape[2] * 8 != out_mask.shape[1] or x_noisy.shape[3] * 8 != out_mask.shape[2]:
@@ -488,7 +484,8 @@ class AdvancedControlBase:
                 del out_mask
                 # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
                 # resize mask and match batch count
-                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=8)
+                multiplier = 1 if direct_attn else 8
+                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier)
                 actual_latent_length = x_noisy.shape[0] // batched_number
                 out_mask = comfy.utils.repeat_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
                 if self.sub_idxs is not None:
@@ -734,3 +731,13 @@ def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim
     if match_dim1:
         mask = torch.cat([mask] * shape[1], dim=1)
     return mask
+
+
+# applies min-max normalization, from:
+# https://stackoverflow.com/questions/68791508/min-max-normalization-of-a-tensor-in-pytorch
+def normalize_min_max(x: Tensor, new_min = 0.0, new_max = 1.0):
+    x_min, x_max = x.min(), x.max()
+    return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
+
+def linear_conversion(x, x_min=0.0, x_max=1.0, new_min=0.0, new_max=1.0):
+    return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min

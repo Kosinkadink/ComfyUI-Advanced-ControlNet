@@ -1,11 +1,12 @@
 import numpy as np
+from torch import Tensor
 
 import folder_paths
 
 from .control import load_controlnet, convert_to_advanced, ControlWeights, ControlWeightType,\
     LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup, is_advanced_controlnet
 from .control import StrengthInterpolation as SI
-from .weight_nodes import DefaultWeights, ScaledSoftControlLoraWeights, ScaledSoftControlNetWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights, \
+from .weight_nodes import DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights, \
     SoftT2IAdapterWeights, CustomT2IAdapterWeights
 from .latent_keyframe_nodes import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
 from .deprecated_nodes import LoadImagesFromDirectory
@@ -124,7 +125,7 @@ class AdvancedControlNetApply:
                 "mask_optional": ("MASK", ),
                 "timestep_kf": ("TIMESTEP_KEYFRAME", ),
                 "latent_kf_override": ("LATENT_KEYFRAME", ),
-                "cn_weights_override": ("CONTROL_NET_WEIGHTS", ),
+                "weights_override": ("CONTROL_NET_WEIGHTS", ),
             }
         }
 
@@ -135,7 +136,7 @@ class AdvancedControlNetApply:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent,
-                         mask_optional=None,
+                         mask_optional: Tensor=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None):
         if strength == 0:
@@ -166,6 +167,7 @@ class AdvancedControlNetApply:
                             c_net.weights_override = weights_override
                         # set cond hint mask
                         if mask_optional is not None:
+                            mask_optional = mask_optional.clone()
                             # if not in the form of a batch, make it so
                             if len(mask_optional.shape) < 3:
                                 mask_optional = mask_optional.unsqueeze(0)
@@ -195,13 +197,12 @@ NODE_CLASS_MAPPINGS = {
     "ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
     "DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
     # Weights
-    "ScaledSoftUniversalWeights": ScaledSoftUniversalWeights,
-    "ScaledSoftControlNetWeights": ScaledSoftControlNetWeights,
+    "ScaledSoftControlNetWeights": ScaledSoftUniversalWeights,
+    "ScaledSoftMaskedUniversalWeights": ScaledSoftMaskedUniversalWeights,
     "SoftControlNetWeights": SoftControlNetWeights,
     "CustomControlNetWeights": CustomControlNetWeights,
     "SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
-    "ScaledSoftControlLoraWeights": ScaledSoftControlLoraWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
     # Image
     "LoadImagesFromDirectory": LoadImagesFromDirectory
@@ -217,16 +218,15 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Conditioning
     "ACN_AdvancedControlNetApply": "Apply Advanced ControlNet 🛂🅐🅒🅝",
     # Loaders
-    "ControlNetLoaderAdvanced": "Load ControlNet Model (Advanced) 🛂🅐🅒🅝",
-    "DiffControlNetLoaderAdvanced": "Load ControlNet Model (diff Advanced) 🛂🅐🅒🅝",
+    "ControlNetLoaderAdvanced": "Load Advanced ControlNet Model 🛂🅐🅒🅝",
+    "DiffControlNetLoaderAdvanced": "Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝",
     # Weights
-    "ScaledSoftUniversalWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
-    "ScaledSoftControlNetWeights": "ControlNet Scaled Soft Weights 🛂🅐🅒🅝",
+    "ScaledSoftControlNetWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
+    "ScaledSoftMaskedUniversalWeights": "Scaled Soft Masked Weights 🛂🅐🅒🅝",
     "SoftControlNetWeights": "ControlNet Soft Weights 🛂🅐🅒🅝",
     "CustomControlNetWeights": "ControlNet Custom Weights 🛂🅐🅒🅝",
     "SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
-    "ScaledSoftControlLoraWeights": "ControlLora Scaled Soft Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Force Default Weights 🛂🅐🅒🅝",
     # Image
     "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝"
