@@ -643,7 +643,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
                 del full_cond_hint_original
 
     def copy(self):
-        c = ControlLoraAdvanced(self.t2i_model, self.timestep_keyframes, self.channels_in)
+        c = T2IAdapterAdvanced(self.t2i_model, self.timestep_keyframes, self.channels_in)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
