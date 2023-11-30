@@ -71,7 +71,7 @@ class ControlNetLoaderAdvanced:
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), ),
             },
             "optional": {
-                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
             }
         }
 
@@ -81,9 +81,8 @@ class ControlNetLoaderAdvanced:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def load_controlnet(self, control_net_name,
-                        timestep_kf: TimestepKeyframeGroup=None, timestep_keyframe: TimestepKeyframeGroup=None # old name
+                        timestep_keyframe: TimestepKeyframeGroup=None
                         ):
-        timestep_keyframe = timestep_keyframe if timestep_keyframe else timestep_kf
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = load_controlnet(controlnet_path, timestep_keyframe)
         return (controlnet,)
@@ -98,7 +97,7 @@ class DiffControlNetLoaderAdvanced:
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), )
             },
             "optional": {
-                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
             }
         }
     
@@ -108,9 +107,8 @@ class DiffControlNetLoaderAdvanced:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def load_controlnet(self, control_net_name, model,
-                        timestep_kf: TimestepKeyframeGroup=None, timestep_keyframe: TimestepKeyframeGroup=None # old name
+                        timestep_keyframe: TimestepKeyframeGroup=None
                         ):
-        timestep_keyframe = timestep_keyframe if timestep_keyframe else timestep_kf
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = load_controlnet(controlnet_path, timestep_keyframe, model)
         if is_advanced_controlnet(controlnet):
