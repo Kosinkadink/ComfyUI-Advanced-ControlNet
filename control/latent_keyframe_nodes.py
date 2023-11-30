@@ -13,13 +13,14 @@ class LatentKeyframeNode:
         return {
             "required": {
                 "batch_index": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1}),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.00001}, ),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
             },
             "optional": {
-                "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
+                "prev_latent_kf": ("LATENT_KEYFRAME", ),
             }
         }
 
+    RETURN_NAMES = ("LATENT_KF", )
     RETURN_TYPES = ("LATENT_KEYFRAME", )
     FUNCTION = "load_keyframe"
 
@@ -28,7 +29,10 @@ class LatentKeyframeNode:
     def load_keyframe(self,
                       batch_index: int,
                       strength: float,
-                      prev_latent_keyframe: LatentKeyframeGroup=None):
+                      prev_latent_kf: LatentKeyframeGroup=None,
+                      prev_latent_keyframe: LatentKeyframeGroup=None, # old name
+                      ):
+        prev_latent_keyframe = prev_latent_keyframe if prev_latent_keyframe else prev_latent_kf
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
         else:
@@ -46,12 +50,13 @@ class LatentKeyframeGroupNode:
                 "index_strengths": ("STRING", {"multiline": True, "default": ""}),
             },
             "optional": {
-                "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
+                "prev_latent_kf": ("LATENT_KEYFRAME", ),
                 "latent_optional": ("LATENT", ),
                 "print_keyframes": ("BOOLEAN", {"default": False})
             }
         }
     
+    RETURN_NAMES = ("LATENT_KF", )
     RETURN_TYPES = ("LATENT_KEYFRAME", )
     FUNCTION = "load_keyframes"
 
@@ -123,9 +128,11 @@ class LatentKeyframeGroupNode:
 
     def load_keyframes(self,
                        index_strengths: str,
-                       prev_latent_keyframe: LatentKeyframeGroup=None,
+                       prev_latent_kf: LatentKeyframeGroup=None,
+                       prev_latent_keyframe: LatentKeyframeGroup=None, # old name
                        latent_image_opt=None,
                        print_keyframes=False):
+        prev_latent_keyframe = prev_latent_keyframe if prev_latent_keyframe else prev_latent_kf
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
         else:
@@ -158,16 +165,17 @@ class LatentKeyframeInterpolationNode:
             "required": {
                 "batch_index_from": ("INT", {"default": 0, "min": -10000, "max": 10000, "step": 1}),
                 "batch_index_to_excl": ("INT", {"default": 0, "min": -10000, "max": 10000, "step": 1}),
-                "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.0001}, ),
-                "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.0001}, ),
+                "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT], ),
             },
             "optional": {
-                "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
+                "prev_latent_kf": ("LATENT_KEYFRAME", ),
                 "print_keyframes": ("BOOLEAN", {"default": False})
             }
         }
 
+    RETURN_NAMES = ("LATENT_KF", )
     RETURN_TYPES = ("LATENT_KEYFRAME", )
     FUNCTION = "load_keyframe"
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
@@ -178,7 +186,8 @@ class LatentKeyframeInterpolationNode:
                         batch_index_to_excl: int,
                         strength_to: float,
                         interpolation: str,
-                        prev_latent_keyframe: LatentKeyframeGroup=None,
+                        prev_latent_kf: LatentKeyframeGroup=None,
+                        prev_latent_keyframe: LatentKeyframeGroup=None, # old name
                         print_keyframes=False):
 
         if (batch_index_from > batch_index_to_excl):
@@ -187,6 +196,7 @@ class LatentKeyframeInterpolationNode:
         if (batch_index_from < 0 and batch_index_to_excl >= 0):
             raise ValueError("batch_index_from and batch_index_to must be either both positive or both negative.")
 
+        prev_latent_keyframe = prev_latent_keyframe if prev_latent_keyframe else prev_latent_kf
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
         else:
@@ -227,19 +237,24 @@ class LatentKeyframeBatchedGroupNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "float_strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.0001, "forceInput": True}),
+                "float_strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.001, "forceInput": True}),
             },
             "optional": {
-                "prev_latent_keyframe": ("LATENT_KEYFRAME", ),
+                "prev_latent_kf": ("LATENT_KEYFRAME", ),
                 "print_keyframes": ("BOOLEAN", {"default": False})
             }
         }
 
+    RETURN_NAMES = ("LATENT_KF", )
     RETURN_TYPES = ("LATENT_KEYFRAME", )
     FUNCTION = "load_keyframe"
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
 
-    def load_keyframe(self, float_strengths: Union[float, list[float]], prev_latent_keyframe: LatentKeyframeGroup=None, print_keyframes=False):
+    def load_keyframe(self, float_strengths: Union[float, list[float]],
+                      prev_latent_kf: LatentKeyframeGroup=None,
+                      prev_latent_keyframe: LatentKeyframeGroup=None, # old name
+                      print_keyframes=False):
+        prev_latent_keyframe = prev_latent_keyframe if prev_latent_keyframe else prev_latent_kf
         if not prev_latent_keyframe:
             prev_latent_keyframe = LatentKeyframeGroup()
         else:

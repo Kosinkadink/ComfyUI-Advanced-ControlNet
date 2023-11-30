@@ -4,7 +4,7 @@ from .control import TimestepKeyframe, TimestepKeyframeGroup, ControlWeights, ge
 from .logger import logger
 
 
-WEIGHTS_RETURN_NAMES = ("CONTROL_NET_WEIGHTS", "TK_SHORTCUT")
+WEIGHTS_RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
 
 
 class DefaultWeights:

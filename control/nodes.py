@@ -21,9 +21,9 @@ class TimestepKeyframeNode:
                 "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
             },
             "optional": {
-                "prev_timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
+                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "control_net_weights": ("CONTROL_NET_WEIGHTS", ),
+                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
                 "latent_keyframe": ("LATENT_KEYFRAME", ),
                 "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "inherit_missing": ("BOOLEAN", {"default": True}, ),
@@ -41,15 +41,17 @@ class TimestepKeyframeNode:
 
     def load_keyframe(self,
                       start_percent: float,
-                      strength: float,
-                      control_net_weights: ControlWeights=None,
+                      strength: float=1.0,
+                      cn_weights: ControlWeights=None, control_net_weights: ControlWeights=None, # old name
                       latent_keyframe: LatentKeyframeGroup=None,
-                      prev_timestep_keyframe: TimestepKeyframeGroup=None,
+                      prev_timestep_kf: TimestepKeyframeGroup=None, prev_timestep_keyframe: TimestepKeyframeGroup=None, # old name
                       null_latent_kf_strength: float=0.0,
                       inherit_missing=True,
                       guarantee_usage=True,
                       mask_optional=None,
                       interpolation: str=SI.NONE,):
+        control_net_weights = control_net_weights if control_net_weights else cn_weights
+        prev_timestep_keyframe = prev_timestep_keyframe if prev_timestep_keyframe else prev_timestep_kf
         if not prev_timestep_keyframe:
             prev_timestep_keyframe = TimestepKeyframeGroup()
         else:
@@ -69,7 +71,7 @@ class ControlNetLoaderAdvanced:
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), ),
             },
             "optional": {
-                "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
+                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
             }
         }
 
@@ -78,7 +80,10 @@ class ControlNetLoaderAdvanced:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
-    def load_controlnet(self, control_net_name, timestep_keyframe: TimestepKeyframeGroup=None):
+    def load_controlnet(self, control_net_name,
+                        timestep_kf: TimestepKeyframeGroup=None, timestep_keyframe: TimestepKeyframeGroup=None # old name
+                        ):
+        timestep_keyframe = timestep_keyframe if timestep_keyframe else timestep_kf
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = load_controlnet(controlnet_path, timestep_keyframe)
         return (controlnet,)
@@ -93,7 +98,7 @@ class DiffControlNetLoaderAdvanced:
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), )
             },
             "optional": {
-                "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
+                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
             }
         }
     
@@ -102,7 +107,10 @@ class DiffControlNetLoaderAdvanced:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
-    def load_controlnet(self, control_net_name, model, timestep_keyframe: TimestepKeyframeGroup=None):
+    def load_controlnet(self, control_net_name, model,
+                        timestep_kf: TimestepKeyframeGroup=None, timestep_keyframe: TimestepKeyframeGroup=None # old name
+                        ):
+        timestep_keyframe = timestep_keyframe if timestep_keyframe else timestep_kf
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = load_controlnet(controlnet_path, timestep_keyframe, model)
         if is_advanced_controlnet(controlnet):
