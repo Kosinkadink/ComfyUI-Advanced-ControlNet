@@ -14,7 +14,7 @@ ControlNet preprocessors are available through [comfyui_controlnet_aux](https://
 ## Table of Contents:
 - [Scheduling Explanation](#scheduling-explanation)
 - [Nodes](#nodes)
-- [Usage](#usage)
+- [Usage](#usage) (will fill this out soon)
 
 
 # Scheduling Explanation
@@ -73,13 +73,13 @@ Loads a ControlNet model and converts it into an Advanced version that supports 
 - 🟪***CONTROL_NET***: loaded Advanced ControlNet
 
 ## Timestep Keyframe
-![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/3950d14d-6757-42f2-a615-9ba81a74e0ca)
+![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/c6f2a86e-fc96-4f8b-b976-7c2062a6eba2)
 
 Scheduling node across timesteps (sampling steps) based on the set start_percent. Chaining Timestep Keyframes allows ControlNet scheduling across sampling steps (percentage-wise), through a timestep keyframe schedule.
 
 ### Inputs
-- 🟨***prev_timestep_keyframe***: used to chain Timestep Keyframes together to create a schedule. The order does not matter - the Timestep Keyframes sort themselves automatically by their start_percent. *Any Timestep Keyframe contained in the prev_timestep_keyframe that contains the same start_percent as the Timestep Keyframe will be overwritten.*
-- 🟨***control_net_weights***: weights to apply to controlnet while this Timestep Keyframe is in effect. Must be compatible with the loaded controlnet, or will throw an error explaining what weight types are compatible. If inherit_missing is True, if no control_net_weight is passed in, will attempt to reuse the last-used weights in the timestep keyframe schedule. *If Apply Advanced ControlNet node has a weight_override, the weight_override will be used during sampling instead of control_net_weight.*
+- 🟨***prev_timestep_kf***: used to chain Timestep Keyframes together to create a schedule. The order does not matter - the Timestep Keyframes sort themselves automatically by their start_percent. *Any Timestep Keyframe contained in the prev_timestep_keyframe that contains the same start_percent as the Timestep Keyframe will be overwritten.*
+- 🟨***cn_weights***: weights to apply to controlnet while this Timestep Keyframe is in effect. Must be compatible with the loaded controlnet, or will throw an error explaining what weight types are compatible. If inherit_missing is True, if no control_net_weight is passed in, will attempt to reuse the last-used weights in the timestep keyframe schedule. *If Apply Advanced ControlNet node has a weight_override, the weight_override will be used during sampling instead of control_net_weight.*
 - 🟨***latent_keyframe***: latent keyframes to apply to controlnet while this Timestep Keyframe is in effect. If inherit_missing is True, if no latent_keyframe is passed in, will attempt to reuse the last-used weights in the timestep keyframe schedule. *If Apply Advanced ControlNet node has a latent_kf_override, the latent_lf_override will be used during sampling instead of latent_keyframe.*
 - 🟨***mask_optional***: attention masks to apply to controlnets; basically, decides what part of the image the controlnet to apply to (and the relative strength, if the mask is not binary). Same as mask_optional on the Apply Advanced ControlNet node, can apply either one maks to all latents, or individual masks for each latent. If inherit_missing is True, if no mask_optional is passed in, will attempt to reuse the last-used mask_optional in the timestep keyframe schedule. It is NOT overriden by mask_optional on the Apply  Advanced ControlNet node; will be used together.
 - 🟦***start_percent***: sampling step percentage at which this Timestep Keyframe qualifies to be used. Acts as the 'key' for the Timestep Keyframe in the timestep keyframe schedule.
@@ -92,21 +92,60 @@ Scheduling node across timesteps (sampling steps) based on the set start_percent
 - 🟪***TIMESTEP_KF***: the created Timestep Keyframe, that can either be linked to another or into a Timestep Keyframe input.
 
 ## Latent Keyframe
-![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/3de8b718-9f4c-46a9-957e-4ff120938b7e)
+![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/7eb2cc4c-255c-4f32-b09b-699f713fada3)
 
 A singular Latent Keyframe, selects the strength for a specific batch_index. If batch_index is not present during sampling, will simply have no effect. Can be chained with any other Latent Keyframe-type node to create a latent keyframe schedule.
 
 ### Inputs
-- 🟨***prev_latent_keyframe***: used to chain Latent Keyframes together to create a schedule. *If a Latent Keyframe contained in prev_latent_keyframes have the same batch_index as this Latent Keyframe, they will take priority over this node's value.*
+- 🟨***prev_latent_kf***: used to chain Latent Keyframes together to create a schedule. *If a Latent Keyframe contained in prev_latent_keyframes have the same batch_index as this Latent Keyframe, they will take priority over this node's value.*
 - 🟦***batch_index***: index of latent in batch to apply controlnet strength to. Acts as the 'key' for the Latent Keyframe in the latent keyframe schedule.
 - 🟦***strength***: strength of controlnet to apply to the corresponding latent.
 
 ### Outputs
+- 🟪***LATENT_KF***: the created Latent Keyframe, that can either be linked to another or into a Latent Keyframe input.
 
+## Latent Keyframe Group
+![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/5ce3b795-f5fc-4dc3-ae30-a4c7f87e278c)
 
+Allows to create Latent Keyframes via individual indeces or python-style ranges.
 
-## Workflows
+### Inputs
+- 🟨***prev_latent_kf***: used to chain Latent Keyframes together to create a schedule. *If any Latent Keyframes contained in prev_latent_keyframes have the same batch_index as a this Latent Keyframe, they will take priority over this node's version.* 
+- 🟨***latent_optional***: the latents expected to be passed in for sampling; only required if you wish to use negative indeces (will be automatically converted to real values).
+- 🟦***index_strengths***: string list of indeces or python-style ranges of indeces to assign strengths to. If latent_optional is passed in, can contain negative indeces or ranges that contain negative numbers, python-style. The different indeces must be comma separated. Individual latents can be specified by ```batch_index=strength```, like ```0=0.9```. Ranges can be specified by ```start_index_inclusive:end_index_exclusive=strength```, like ```0:8=strength```. Negative indeces are possible when latents_optional has an input, with a string such as ```0,-4=0.25```.
+- 🟦***print_keyframes***: if True, will print the Latent Keyframes generated by this node for debugging purposes.
 
-### AnimateDiff Workflows
-***Latent Keyframes*** identify which latents in a batch the ControlNet should apply to, and at what strength. They connect to a ***Timestep Keyframe*** to identify at what point in the generation to kick in (for basic use, start_percent on the Timestep Keyframe should be 0.0). Latent Keyframe nodes can be chained to apply the ControlNet to multiple keyframes at various strengths.
+### Outputs
+- 🟪***LATENT_KF***: the created Latent Keyframe, that can either be linked to another or into a Latent Keyframe input.
 
+## Latent Keyframe Interpolation
+![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/7986c737-83b9-46bc-aab0-ae4c368df446)
+
+Allows to create Latent Keyframes with interpolated values in a range.
+
+### Inputs
+- 🟨***prev_latent_kf***: used to chain Latent Keyframes together to create a schedule. *If any Latent Keyframes contained in prev_latent_keyframes have the same batch_index as a this Latent Keyframe, they will take priority over this node's version.*
+- 🟦***batch_index_from***: starting batch_index of range, included.
+- 🟦***batch_index_to***: end batch_index of range, excluded (python-style range).
+- 🟦***strength_from***: starting strength of interpolation.
+- 🟦***strength_to***: end strength of interpolation.
+- 🟦***interpolation***: the method of interpolation.
+- 🟦***print_keyframes***: if True, will print the Latent Keyframes generated by this node for debugging purposes.
+
+### Outputs
+- 🟪***LATENT_KF***: the created Latent Keyframe, that can either be linked to another or into a Latent Keyframe input.
+
+## Latent Keyframe Batched Group
+![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/6cec701f-6183-4aeb-af5c-cac76f5591b7)
+
+Allows to create Latent Keyframes via a list of floats, such as with Batch Value Schedule from [ComfyUI_FizzNodes](https://github.com/FizzleDorf/ComfyUI_FizzNodes) nodes.
+
+### Inputs
+- 🟨***prev_latent_kf***: used to chain Latent Keyframes together to create a schedule. *If any Latent Keyframes contained in prev_latent_keyframes have the same batch_index as a this Latent Keyframe, they will take priority over this node's version.* 
+- 🟦***float_strengths***: a list of floats, that will correspond to the strength of each Latent Keyframe; the batch_index is the index of each float value in the list.
+- 🟦***print_keyframes***: if True, will print the Latent Keyframes generated by this node for debugging purposes.
+
+### Outputs
+- 🟪***LATENT_KF***: the created Latent Keyframe, that can either be linked to another or into a Latent Keyframe input.
+
+# There are more nodes to document and show usage - will add this soon! TODO
