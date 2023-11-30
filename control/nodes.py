@@ -21,10 +21,10 @@ class TimestepKeyframeNode:
                 "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
             },
             "optional": {
+                "prev_timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "control_net_weights": ("CONTROL_NET_WEIGHTS", ),
                 "latent_keyframe": ("LATENT_KEYFRAME", ),
-                "prev_timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
                 "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "inherit_missing": ("BOOLEAN", {"default": True}, ),
                 "guarantee_usage": ("BOOLEAN", {"default": True}, ),
