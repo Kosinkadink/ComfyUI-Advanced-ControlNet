@@ -6,6 +6,7 @@ import comfy.utils
 import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
 
+from .logger import logger
 
 def get_properly_arranged_t2i_weights(initial_weights: list[float]):
     new_weights = []
@@ -708,20 +709,81 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
                                    global_average_pooling=v.global_average_pooling, device=v.device)
 
 
-class ControlLLLiteAdvanced(ControlNet, AdvancedControlBase):
-    def __init__(self, control_weights, timestep_keyframes: TimestepKeyframeGroup, device=None):
+class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
+    # This ControlNet is more of an attention patch than a traditional controlnet
+    # So, the pre_run will be responsible for a lot of the functionality,
+    #     while the usual get_control is mostly used to set some values
+    def __init__(self, timestep_keyframes: TimestepKeyframeGroup, device=None):
+        super().__init__(device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
+        self.already_patched = False
+
+    def set_cond_hint(self, *args, **kwargs):
+        super().set_cond_hint(*args, **kwargs)
+        # cond hint for LLLite needs to be scaled between (-1, 1) instead of (0, 1)
+        self.cond_hint_original = self.cond_hint_original * 2.0 - 1.0
+
+    def pre_run_advanced(self, model, percent_to_timestep_function):
+        AdvancedControlBase.pre_run_advanced(self, model, percent_to_timestep_function)
+        logger.info(f"In ControlLLLiteAdvanced pre_run_advanced! {self.already_patched}")
+        # perform patches if not already patches
+        if not self.already_patched:
+            self.already_patched = True
+
+    def get_control(self, x_noisy: Tensor, t, cond, batched_number):
+        logger.info("In ControlLLLiteAdvanced get_control!")
+        # prepare timestep and everything related
+        self.prepare_current_timestep(t=t, batched_number=batched_number)
+        # perform other controlnets
+        control_prev = None
+        if self.previous_controlnet is not None:
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+        if control_prev is not None:
+            return control_prev
+        else:
+            return None
+    
+    def get_models(self):
+        logger.info(f"In ControlLLLiteAdvanced get_models!")
+        # get_models is called once at the start of every KSampler run - use to reset already_patched status
+        self.already_patched = False
+        out = super().get_models()
+        return out
+
+    def copy(self):
+        c = ControlLLLiteAdvanced(self.timestep_keyframes)
+        self.copy_to(c)
+        self.copy_to_advanced(c)
+        return c
+
+    def cleanup(self):
+        super().cleanup()
+        self.cleanup_advanced()
+        self.already_patched = False
 
 
 def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, model=None):
-    control = comfy_cn.load_controlnet(ckpt_path, model=model)
-    # TODO: support controlnet-lllite
-    # if is None, see if is a non-vanilla ControlNet
-    # if control is None:
+    controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+    control = None
+    # check if a non-vanilla ControlNet
+    controlnet_type = ControlWeightType.DEFAULT
+    for key in controlnet_data:
+        if "lllite" in key:
+            logger.info("ControlLLLite controlnet!")
+            controlnet_type = ControlWeightType.CONTROLLLLITE
+            break
+    if controlnet_type != ControlWeightType.DEFAULT:
+        if controlnet_type == ControlWeightType.CONTROLLLLITE:
+            control = ControlLLLiteAdvanced(timestep_keyframes=timestep_keyframe)
+            # load Controll
+    # otherwise, load vanilla ControlNet
+    else:
+        control = comfy_cn.load_controlnet(ckpt_path, model=model)
+    # from pathlib import Path
+    # with open(Path(__file__).parent.parent.parent / "controlnet_keys.txt", "w") as cfile:
     #     controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
-    #     # check if lllite
-    #     if "lllite_unet" in controlnet_data:
-    #         pass
+    #     for key in controlnet_data:
+    #         cfile.write(f"{key}\n")
     return convert_to_advanced(control, timestep_keyframe=timestep_keyframe)
 
 
