@@ -559,8 +559,8 @@ class AdvancedControlBase:
 
 
 class ControlNetAdvanced(ControlNet, AdvancedControlBase):
-    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None):
-        super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, device=device)
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
 
     def get_universal_weights(self) -> ControlWeights:
@@ -583,8 +583,11 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 else:
                     return None
 
-        output_dtype = x_noisy.dtype
+        dtype = self.control_model.dtype
+        if self.manual_cast_dtype is not None:
+            dtype = self.manual_cast_dtype
 
+        output_dtype = x_noisy.dtype
         # make cond_hint appropriate dimensions
         # TODO: change this to not require cond_hint upscaling every step when self.sub_idxs are present
         if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * 8 != self.cond_hint.shape[2] or x_noisy.shape[3] * 8 != self.cond_hint.shape[3]:
@@ -593,14 +596,14 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
             if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(self.control_model.dtype).to(self.device)
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(self.control_model.dtype).to(self.device)
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
-        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=self.control_model.dtype)
+        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
 
         context = cond['c_crossattn']
         # uses 'y' in new ComfyUI update
@@ -608,15 +611,15 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         if y is None: # TODO: remove this in the future since no longer used by newest ComfyUI
             y = cond.get('c_adm', None)
         if y is not None:
-            y = y.to(self.control_model.dtype)
+            y = y.to(dtype)
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
 
-        control = self.control_model(x=x_noisy.to(self.control_model.dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(self.control_model.dtype), y=y)
+        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
         return self.control_merge(None, control, control_prev, output_dtype)
 
     def copy(self):
-        c = ControlNetAdvanced(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling)
+        c = ControlNetAdvanced(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
@@ -624,7 +627,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
     @staticmethod
     def from_vanilla(v: ControlNet, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlNetAdvanced':
         return ControlNetAdvanced(control_model=v.control_model, timestep_keyframes=timestep_keyframe,
-                                  global_average_pooling=v.global_average_pooling, device=v.device)
+                                  global_average_pooling=v.global_average_pooling, device=v.device, load_device=v.load_device, manual_cast_dtype=v.manual_cast_dtype)
 
 
 class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
