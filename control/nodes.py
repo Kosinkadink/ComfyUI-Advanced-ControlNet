@@ -3,13 +3,13 @@ from torch import Tensor
 
 import folder_paths
 
-from .control import load_controlnet, convert_to_advanced, ControlWeights, ControlWeightType,\
-    LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup, is_advanced_controlnet
-from .control import StrengthInterpolation as SI
-from .weight_nodes import DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights, \
-    SoftT2IAdapterWeights, CustomT2IAdapterWeights
-from .latent_keyframe_nodes import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
-from .deprecated_nodes import LoadImagesFromDirectory
+from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet
+from .utils import ControlWeights, ControlWeightType, LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup
+from .utils import StrengthInterpolation as SI
+from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
+    SoftT2IAdapterWeights, CustomT2IAdapterWeights)
+from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
+from .nodes_deprecated import LoadImagesFromDirectory
 from .logger import logger
 
 

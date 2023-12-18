@@ -1,222 +1,18 @@
-from typing import Union
+from typing import Callable, Union
 from torch import Tensor
 import torch
+import os
 
 import comfy.utils
+import comfy.model_management
+import comfy.model_detection
 import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
 
+from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper
+from .utils import (TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
+                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory)
 from .logger import logger
-
-def get_properly_arranged_t2i_weights(initial_weights: list[float]):
-    new_weights = []
-    new_weights.extend([initial_weights[0]]*3)
-    new_weights.extend([initial_weights[1]]*3)
-    new_weights.extend([initial_weights[2]]*3)
-    new_weights.extend([initial_weights[3]]*3)
-    return new_weights
-
-
-class ControlWeightType:
-    DEFAULT = "default"
-    UNIVERSAL = "universal"
-    T2IADAPTER = "t2iadapter"
-    CONTROLNET = "controlnet"
-    CONTROLLORA = "controllora"
-    CONTROLLLLITE = "controllllite"
-
-
-class ControlWeights:
-    def __init__(self, weight_type: str, base_multiplier: float=1.0, flip_weights: bool=False, weights: list[float]=None, weight_mask: Tensor=None):
-        self.weight_type = weight_type
-        self.base_multiplier = base_multiplier
-        self.flip_weights = flip_weights
-        self.weights = weights
-        if self.weights is not None and self.flip_weights:
-            self.weights.reverse()
-        self.weight_mask = weight_mask
-
-    def get(self, idx: int) -> Union[float, Tensor]:
-        # if weights is not none, return index
-        if self.weights is not None:
-            return self.weights[idx]
-        return 1.0
-
-    @classmethod
-    def default(cls):
-        return cls(ControlWeightType.DEFAULT)
-
-    @classmethod
-    def universal(cls, base_multiplier: float, flip_weights: bool=False):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights)
-    
-    @classmethod
-    def universal_mask(cls, weight_mask: Tensor):
-        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask)
-
-    @classmethod
-    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False):
-        if weights is None:
-            weights = [1.0]*12
-        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights)
-
-    @classmethod
-    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False):
-        if weights is None:
-            weights = [1.0]*13
-        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights)
-    
-    @classmethod
-    def controllora(cls, weights: list[float]=None, flip_weights: bool=False):
-        if weights is None:
-            weights = [1.0]*10
-        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights)
-    
-    @classmethod
-    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False):
-        if weights is None:
-            # TODO: make this have a real value
-            weights = [1.0]*200
-        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights)
-
-
-class StrengthInterpolation:
-    LINEAR = "linear"
-    EASE_IN = "ease-in"
-    EASE_OUT = "ease-out"
-    EASE_IN_OUT = "ease-in-out"
-    NONE = "none"
-
-
-class LatentKeyframe:
-    def __init__(self, batch_index: int, strength: float) -> None:
-        self.batch_index = batch_index
-        self.strength = strength
-
-
-# always maintain sorted state (by batch_index of LatentKeyframe)
-class LatentKeyframeGroup:
-    def __init__(self) -> None:
-        self.keyframes: list[LatentKeyframe] = []
-
-    def add(self, keyframe: LatentKeyframe) -> None:
-        added = False
-        # replace existing keyframe if same batch_index
-        for i in range(len(self.keyframes)):
-            if self.keyframes[i].batch_index == keyframe.batch_index:
-                self.keyframes[i] = keyframe
-                added = True
-                break
-        if not added:
-            self.keyframes.append(keyframe)
-        self.keyframes.sort(key=lambda k: k.batch_index)
-    
-    def get_index(self, index: int) -> Union[LatentKeyframe, None]:
-        try:
-            return self.keyframes[index]
-        except IndexError:
-            return None
-    
-    def __getitem__(self, index) -> LatentKeyframe:
-        return self.keyframes[index]
-    
-    def is_empty(self) -> bool:
-        return len(self.keyframes) == 0
-
-    def clone(self) -> 'LatentKeyframeGroup':
-        cloned = LatentKeyframeGroup()
-        for tk in self.keyframes:
-            cloned.add(tk)
-        return cloned
-
-
-class TimestepKeyframe:
-    def __init__(self,
-                 start_percent: float = 0.0,
-                 strength: float = 1.0,
-                 interpolation: str = StrengthInterpolation.NONE,
-                 control_weights: ControlWeights = None,
-                 latent_keyframes: LatentKeyframeGroup = None,
-                 null_latent_kf_strength: float = 0.0,
-                 inherit_missing: bool = True,
-                 guarantee_usage: bool = True,
-                 mask_hint_orig: Tensor = None) -> None:
-        self.start_percent = start_percent
-        self.start_t = 999999999.9
-        self.strength = strength
-        self.interpolation = interpolation
-        self.control_weights = control_weights
-        self.latent_keyframes = latent_keyframes
-        self.null_latent_kf_strength = null_latent_kf_strength
-        self.inherit_missing = inherit_missing
-        self.guarantee_usage = guarantee_usage
-        self.mask_hint_orig = mask_hint_orig
-
-    def has_control_weights(self):
-        return self.control_weights is not None
-    
-    def has_latent_keyframes(self):
-        return self.latent_keyframes is not None
-    
-    def has_mask_hint(self):
-        return self.mask_hint_orig is not None
-    
-    
-    @classmethod
-    def default(cls) -> 'TimestepKeyframe':
-        return cls(0.0)
-
-
-# always maintain sorted state (by start_percent of TimestepKeyFrame)
-class TimestepKeyframeGroup:
-    def __init__(self) -> None:
-        self.keyframes: list[TimestepKeyframe] = []
-        self.keyframes.append(TimestepKeyframe.default())
-
-    def add(self, keyframe: TimestepKeyframe) -> None:
-        added = False
-        # replace existing keyframe if same start_percent
-        for i in range(len(self.keyframes)):
-            if self.keyframes[i].start_percent == keyframe.start_percent:
-                self.keyframes[i] = keyframe
-                added = True
-                break
-        if not added:
-            self.keyframes.append(keyframe)
-        self.keyframes.sort(key=lambda k: k.start_percent)
-
-    def get_index(self, index: int) -> Union[TimestepKeyframe, None]:
-        try:
-            return self.keyframes[index]
-        except IndexError:
-            return None
-    
-    def has_index(self, index: int) -> int:
-        return index >=0 and index < len(self.keyframes)
-
-    def __getitem__(self, index) -> TimestepKeyframe:
-        return self.keyframes[index]
-    
-    def __len__(self) -> int:
-        return len(self.keyframes)
-
-    def is_empty(self) -> bool:
-        return len(self.keyframes) == 0
-    
-    def clone(self) -> 'TimestepKeyframeGroup':
-        cloned = TimestepKeyframeGroup()
-        for tk in self.keyframes:
-            cloned.add(tk)
-        return cloned
-    
-    @classmethod
-    def default(cls, keyframe: TimestepKeyframe) -> 'TimestepKeyframeGroup':
-        group = cls()
-        group.keyframes[0] = keyframe
-        return group
-
-
-# used to inject ControlNetAdvanced and T2IAdapterAdvanced control_merge function
 
 
 class AdvancedControlBase:
@@ -765,23 +561,56 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.already_patched = False
 
 
+class SparseCtrlAdvanced(ControlNetAdvanced):
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+        self.add_compatible_weight(ControlWeightType.SPARSECTRL)
+    
+    def copy(self):
+        c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)
+        self.copy_to(c)
+        self.copy_to_advanced(c)
+        return c
+
+
 def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, model=None):
     controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
     control = None
     # check if a non-vanilla ControlNet
     controlnet_type = ControlWeightType.DEFAULT
+    has_controlnet_key = False
+    has_motion_modules_key = False
     for key in controlnet_data:
+        # LLLLite check
         if "lllite" in key:
             logger.info("ControlLLLite controlnet!")
             controlnet_type = ControlWeightType.CONTROLLLLITE
             break
+        # SparseCtrl check
+        elif "motion_modules" in key:
+            has_motion_modules_key = True
+        elif "controlnet" in key:
+            has_controlnet_key = True
+    if has_controlnet_key and has_motion_modules_key:
+        controlnet_type = ControlWeightType.SPARSECTRL
+
     if controlnet_type != ControlWeightType.DEFAULT:
         if controlnet_type == ControlWeightType.CONTROLLLLITE:
+            raise NotImplementedError("ControlLLLite has not been fully implemented yet!")
             control = ControlLLLiteAdvanced(timestep_keyframes=timestep_keyframe)
             # load Controll
+        elif controlnet_type == ControlWeightType.SPARSECTRL:
+            #raise NotImplementedError("SparseCtrl has not been fully implemented yet!")
+            control = load_sparsectrl(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe, model=model)
     # otherwise, load vanilla ControlNet
     else:
-        control = comfy_cn.load_controlnet(ckpt_path, model=model)
+        try:
+            # hacky way of getting load_torch_file in load_controlnet to use already-present controlnet_data and not redo loading
+            orig_load_torch_file = comfy.utils.load_torch_file
+            comfy.utils.load_torch_file = load_torch_file_with_dict_factory(controlnet_data, orig_load_torch_file)
+            control = comfy_cn.load_controlnet(ckpt_path, model=model)
+        finally:
+            comfy.utils.load_torch_file = orig_load_torch_file
     # from pathlib import Path
     # with open(Path(__file__).parent.parent.parent / "controlnet_keys.txt", "w") as cfile:
     #     controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
@@ -811,25 +640,151 @@ def is_advanced_controlnet(input_object):
     return hasattr(input_object, "sub_idxs")
 
 
-# adapted from comfy/sample.py
-def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False):
-    mask = mask.clone()
-    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[2]*multiplier, shape[3]*multiplier), mode="bilinear")
-    if match_dim1:
-        mask = torch.cat([mask] * shape[1], dim=1)
-    return mask
+def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None, model=None) -> SparseCtrlAdvanced:
+    if controlnet_data is None:
+        controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+    # first, separate out motion part from normal controlnet part and attempt to load that portion
+    motion_data = {}
+    for key in list(controlnet_data.keys()):
+        if "temporal" in key:
+            motion_data[key] = controlnet_data.pop(key)
+    motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data).to(comfy.model_management.unet_dtype())
+    missing, unexpected = motion_wrapper.load_state_dict(motion_data)
+    if len(missing) > 0 or len(unexpected) > 0:
+        logger.info(f"SparseCtrlMotionWrapper: {missing}, {unexpected}")
 
+    # now, load as if it was a normal controlnet - mostly copied from comfy load_controlnet function
+    controlnet_config = None
+    is_diffusers = False
+    use_simplified_conditioning_embedding = False
+    if "controlnet_cond_embedding.conv_in.weight" in controlnet_data:
+        is_diffusers = True
+    if "controlnet_cond_embedding.weight" in controlnet_data:
+        is_diffusers = True
+        use_simplified_conditioning_embedding = True
+    if is_diffusers: #diffusers format
+        unet_dtype = comfy.model_management.unet_dtype()
+        controlnet_config = comfy.model_detection.unet_config_from_diffusers_unet(controlnet_data, unet_dtype)
+        diffusers_keys = comfy.utils.unet_to_diffusers(controlnet_config)
+        diffusers_keys["controlnet_mid_block.weight"] = "middle_block_out.0.weight"
+        diffusers_keys["controlnet_mid_block.bias"] = "middle_block_out.0.bias"
 
-# applies min-max normalization, from:
-# https://stackoverflow.com/questions/68791508/min-max-normalization-of-a-tensor-in-pytorch
-def normalize_min_max(x: Tensor, new_min = 0.0, new_max = 1.0):
-    x_min, x_max = x.min(), x.max()
-    return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
+        count = 0
+        loop = True
+        while loop:
+            suffix = [".weight", ".bias"]
+            for s in suffix:
+                k_in = "controlnet_down_blocks.{}{}".format(count, s)
+                k_out = "zero_convs.{}.0{}".format(count, s)
+                if k_in not in controlnet_data:
+                    loop = False
+                    break
+                diffusers_keys[k_in] = k_out
+            count += 1
+        # normal conditioning embedding
+        if not use_simplified_conditioning_embedding:
+            count = 0
+            loop = True
+            while loop:
+                suffix = [".weight", ".bias"]
+                for s in suffix:
+                    if count == 0:
+                        k_in = "controlnet_cond_embedding.conv_in{}".format(s)
+                    else:
+                        k_in = "controlnet_cond_embedding.blocks.{}{}".format(count - 1, s)
+                    k_out = "input_hint_block.{}{}".format(count * 2, s)
+                    if k_in not in controlnet_data:
+                        k_in = "controlnet_cond_embedding.conv_out{}".format(s)
+                        loop = False
+                    diffusers_keys[k_in] = k_out
+                count += 1
+        # simplified conditioning embedding
+        else:
+            count = 0
+            suffix = [".weight", ".bias"]
+            for s in suffix:
+                k_in = "controlnet_cond_embedding{}".format(s)
+                k_out = "input_hint_block.{}{}".format(count, s)
+                diffusers_keys[k_in] = k_out
 
-def linear_conversion(x, x_min=0.0, x_max=1.0, new_min=0.0, new_max=1.0):
-    return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
+        new_sd = {}
+        for k in diffusers_keys:
+            if k in controlnet_data:
+                new_sd[diffusers_keys[k]] = controlnet_data.pop(k)
 
+        leftover_keys = controlnet_data.keys()
+        if len(leftover_keys) > 0:
+            logger.info("leftover keys:", leftover_keys)
+        controlnet_data = new_sd
 
-class WeightTypeException(TypeError):
-    "Raised when weight not compatible with AdvancedControlBase object"
-    pass
+    pth_key = 'control_model.zero_convs.0.0.weight'
+    pth = False
+    key = 'zero_convs.0.0.weight'
+    if pth_key in controlnet_data:
+        pth = True
+        key = pth_key
+        prefix = "control_model."
+    elif key in controlnet_data:
+        prefix = ""
+    else:
+        raise ValueError("The provided model is not a valid SparseCtrl model! [ErrorCode: HORSERADISH]")
+
+    if controlnet_config is None:
+        unet_dtype = comfy.model_management.unet_dtype()
+        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, unet_dtype, True).unet_config
+    load_device = comfy.model_management.get_torch_device()
+    manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
+    if manual_cast_dtype is not None:
+        controlnet_config["operations"] = manual_cast_clean_groupnorm
+    else:
+        controlnet_config["operations"] = disable_weight_init_clean_groupnorm
+    controlnet_config.pop("out_channels")
+    # get proper hint channels
+    if use_simplified_conditioning_embedding:
+        controlnet_config["hint_channels"] = controlnet_data["{}input_hint_block.0.weight".format(prefix)].shape[1]
+        controlnet_config["use_simplified_conditioning_embedding"] = use_simplified_conditioning_embedding
+    else:
+        controlnet_config["hint_channels"] = controlnet_data["{}input_hint_block.0.weight".format(prefix)].shape[1]
+        controlnet_config["use_simplified_conditioning_embedding"] = use_simplified_conditioning_embedding
+    control_model = SparseControlNet(**controlnet_config)
+
+    if pth:
+        if 'difference' in controlnet_data:
+            if model is not None:
+                comfy.model_management.load_models_gpu([model])
+                model_sd = model.model_state_dict()
+                for x in controlnet_data:
+                    c_m = "control_model."
+                    if x.startswith(c_m):
+                        sd_key = "diffusion_model.{}".format(x[len(c_m):])
+                        if sd_key in model_sd:
+                            cd = controlnet_data[x]
+                            cd += model_sd[sd_key].type(cd.dtype).to(cd.device)
+            else:
+                logger.warning("WARNING: Loaded a diff SparseCtrl without a model. It will very likely not work.")
+
+        class WeightsLoader(torch.nn.Module):
+            pass
+        w = WeightsLoader()
+        w.control_model = control_model
+        missing, unexpected = w.load_state_dict(controlnet_data, strict=False)
+    else:
+        missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
+    if len(missing) > 0 or len(unexpected) > 0:
+        logger.info(f"SparseCtrl ControlNet: {missing}, {unexpected}")
+
+    global_average_pooling = False
+    filename = os.path.splitext(ckpt_path)[0]
+    if filename.endswith("_shuffle") or filename.endswith("_shuffle_fp16"): #TODO: smarter way of enabling global_average_pooling
+        global_average_pooling = True
+
+    # both motion portion and controlnet portions are loaded; bring them together
+    motion_wrapper.inject(control_model)
+
+    control = SparseCtrlAdvanced(control_model, timestep_keyframes=timestep_keyframe, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    new_state_dict = control_model.state_dict()
+    from pathlib import Path
+    with open(Path(__file__).parent.parent.parent / "sparcectrlstatedict.txt", "w") as cfile:
+        for key in new_state_dict:
+            cfile.write(f"{key}\n")
+    return control

@@ -4,7 +4,7 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageOps
-from .control import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, TimestepKeyframe
+from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, TimestepKeyframe
 from .logger import logger
 
 
