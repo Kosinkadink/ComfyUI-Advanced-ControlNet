@@ -9,7 +9,7 @@ from .utils import StrengthInterpolation as SI
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
-from .nodes_deprecated import LoadImagesFromDirectory
+from .nodes_sparsectrl import SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, VAEEncodePreprocessor
 from .logger import logger
 
 
@@ -214,8 +214,11 @@ NODE_CLASS_MAPPINGS = {
     "SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
-    # Image
-    "LoadImagesFromDirectory": LoadImagesFromDirectory
+    # SparseCtrl
+    "ACN_VAEEncodePreprocessor": VAEEncodePreprocessor,
+    "ACN_SparseCtrlLoaderAdvanced": SparseCtrlLoaderAdvanced,
+    "ACN_SparseCtrlIndexMethodNode": SparseIndexMethodNode,
+    "ACN_SparseCtrlSpreadMethodNode": SparseSpreadMethodNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -238,6 +241,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Force Default Weights 🛂🅐🅒🅝",
-    # Image
-    "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝"
+    # SparseCtrl
+    "ACN_VAEEncodePreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
+    "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",
+    "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
+    "ACN_SparseCtrlSpreadMethodNode": "SparseCtrl Spread Method 🛂🅐🅒🅝",
 }
