@@ -245,14 +245,18 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         if self.manual_cast_dtype is not None:
             dtype = self.manual_cast_dtype
         output_dtype = x_noisy.dtype
+        # set actual input length on motion model
+        actual_length = x_noisy.size(0)//batched_number
+        full_length = actual_length if self.sub_idxs is None else self.full_latent_length
+        self.control_model.set_actual_length(actual_length=actual_length, full_length=full_length)
         # prepare cond_hint, if needed
-        if self.sub_idxs is not None or self.cond_hint is None:
+        dim_mult = 1 if self.control_model.use_simplified_conditioning_embedding else 8
+        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[0] != self.cond_hint.shape[0] or x_noisy.shape[2]*dim_mult != self.cond_hint.shape[2] or x_noisy.shape[3]*dim_mult != self.cond_hint.shape[3]:
             # clear out cond_hint and conditioning_mask
             if self.cond_hint is not None:
                 del self.cond_hint
             self.cond_hint = None
             # first, figure out which cond idxs are relevant, and where they fit in
-            full_length = x_noisy.size(0)//batched_number if self.sub_idxs is None else self.full_latent_length
             cond_idxs = self.sparse_settings.sparse_method.get_indeces(hint_length=self.cond_hint_original.size(0), full_length=full_length)
             
             range_idxs = list(range(full_length)) if self.sub_idxs is None else self.sub_idxs
@@ -285,9 +289,9 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             self.cond_hint = torch.cat([self.cond_hint, cond_mask], dim=1)
             del sub_cond_hint
             del cond_mask
-            # make cond_hint match x_noisy batch
-            if x_noisy.shape[0] != self.cond_hint.shape[0]:
-                self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+        # make cond_hint match x_noisy batch
+        if x_noisy.shape[0] != self.cond_hint.shape[0]:
+            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)

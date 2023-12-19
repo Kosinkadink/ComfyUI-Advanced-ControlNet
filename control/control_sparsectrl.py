@@ -43,6 +43,10 @@ class SparseControlNet(ControlNetCLDM):
             )
         self.motion_holder: MotionWrapperHolder = None
     
+    def set_actual_length(self, actual_length: int, full_length: int):
+        if self.motion_holder is not None:
+            self.motion_holder.motion_wrapper.set_video_length(video_length=actual_length, full_length=full_length)
+
     def forward(self, x: Tensor, hint: Tensor, timesteps, context, y=None, **kwargs):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
         emb = self.time_embed(t_emb)
@@ -256,10 +260,12 @@ class SparseCtrlMotionWrapper(nn.Module):
 
     def set_video_length(self, video_length: int, full_length: int):
         self.AD_video_length = video_length
-        for block in self.down_blocks:
-            block.set_video_length(video_length, full_length)
-        for block in self.up_blocks:
-            block.set_video_length(video_length, full_length)
+        if self.down_blocks is not None:
+            for block in self.down_blocks:
+                block.set_video_length(video_length, full_length)
+        if self.up_blocks is not None:
+            for block in self.up_blocks:
+                block.set_video_length(video_length, full_length)
         if self.mid_block is not None:
             self.mid_block.set_video_length(video_length, full_length)
     
