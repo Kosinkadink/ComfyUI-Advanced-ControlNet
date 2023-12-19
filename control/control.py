@@ -251,7 +251,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.control_model.set_actual_length(actual_length=actual_length, full_length=full_length)
         # prepare cond_hint, if needed
         dim_mult = 1 if self.control_model.use_simplified_conditioning_embedding else 8
-        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[0] != self.cond_hint.shape[0] or x_noisy.shape[2]*dim_mult != self.cond_hint.shape[2] or x_noisy.shape[3]*dim_mult != self.cond_hint.shape[3]:
+        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2]*dim_mult != self.cond_hint.shape[2] or x_noisy.shape[3]*dim_mult != self.cond_hint.shape[3]:
             # clear out cond_hint and conditioning_mask
             if self.cond_hint is not None:
                 del self.cond_hint
