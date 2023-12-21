@@ -374,7 +374,7 @@ def is_advanced_controlnet(input_object):
     return hasattr(input_object, "sub_idxs")
 
 
-def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None, sparse_settings=None, model=None) -> SparseCtrlAdvanced:
+def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None, sparse_settings=SparseSettings.default(), model=None) -> SparseCtrlAdvanced:
     if controlnet_data is None:
         controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
     # first, separate out motion part from normal controlnet part and attempt to load that portion
@@ -512,8 +512,9 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
     if filename.endswith("_shuffle") or filename.endswith("_shuffle_fp16"): #TODO: smarter way of enabling global_average_pooling
         global_average_pooling = True
 
-    # both motion portion and controlnet portions are loaded; bring them together
-    motion_wrapper.inject(control_model)
+    # both motion portion and controlnet portions are loaded; bring them together if using motion model
+    if sparse_settings.use_motion:
+        motion_wrapper.inject(control_model)
 
     control = SparseCtrlAdvanced(control_model, timestep_keyframes=timestep_keyframe, sparse_settings=sparse_settings, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
     return control

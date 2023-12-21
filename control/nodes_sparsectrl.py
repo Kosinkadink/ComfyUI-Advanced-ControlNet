@@ -13,6 +13,7 @@ class SparseCtrlLoaderAdvanced:
         return {
             "required": {
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), ),
+                "use_motion": ("BOOLEAN", {"default": True}, ),
             },
             "optional": {
                 "sparse_method": ("SPARSE_METHOD", ),
@@ -25,9 +26,9 @@ class SparseCtrlLoaderAdvanced:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
 
-    def load_controlnet(self, control_net_name: str, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None):
+    def load_controlnet(self, control_net_name: str, use_motion: bool, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None):
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
-        sparse_settings = SparseSettings(sparse_method=sparse_method)
+        sparse_settings = SparseSettings(sparse_method=sparse_method, use_motion=use_motion)
         controlnet = load_sparsectrl(controlnet_path, timestep_keyframe=tk_optional, sparse_settings=sparse_settings)
         return (controlnet,)
 
@@ -70,7 +71,7 @@ class SparseSpreadMethodNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "spread": (SparseSpreadMethod.LIST),
+                "spread": (SparseSpreadMethod.LIST,),
             }
         }
     
