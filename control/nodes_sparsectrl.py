@@ -37,7 +37,7 @@ class SparseIndexMethodNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "indeces": ("STRING", {"default": "0"}),
+                "indexes": ("STRING", {"default": "0"}),
             }
         }
     
@@ -46,18 +46,22 @@ class SparseIndexMethodNode:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
 
-    def get_method(self, indeces: str):
+    def get_method(self, indexes: str):
         idxs = []
+        unique_idxs = set()
         # get indeces from string
-        str_idxs = [x.strip() for x in indeces.strip().split(",")]
+        str_idxs = [x.strip() for x in indexes.strip().split(",")]
         for str_idx in str_idxs:
             try:
                 idx = int(str_idx)
+                if idx in unique_idxs:
+                    raise ValueError(f"'{idx}' is duplicated; indexes must be unique.")
                 idxs.append(idx)
+                unique_idxs.add(idx)
             except ValueError:
                 raise ValueError(f"'{str_idx}' is not a valid integer index.")
         if len(idxs) == 0:
-            raise ValueError(f"No indeces were listed in Sparse Index Method.")
+            raise ValueError(f"No indexes were listed in Sparse Index Method.")
         return (SparseIndexMethod(idxs),)
 
 
@@ -66,7 +70,7 @@ class SparseSpreadMethodNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "from_start": ("BOOLEAN", {"default": True}),
+                "spread": (SparseSpreadMethod.LIST),
             }
         }
     
@@ -75,8 +79,8 @@ class SparseSpreadMethodNode:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
 
-    def get_method(self, from_start: bool):
-        return (SparseSpreadMethod(from_start=from_start),)
+    def get_method(self, spread: str):
+        return (SparseSpreadMethod(spread=spread),)
 
 
 class VAEEncodePreprocessor:

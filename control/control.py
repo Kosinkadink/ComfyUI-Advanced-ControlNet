@@ -257,7 +257,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                 del self.cond_hint
             self.cond_hint = None
             # first, figure out which cond idxs are relevant, and where they fit in
-            cond_idxs = self.sparse_settings.sparse_method.get_indeces(hint_length=self.cond_hint_original.size(0), full_length=full_length)
+            cond_idxs = self.sparse_settings.sparse_method.get_indexes(hint_length=self.cond_hint_original.size(0), full_length=full_length)
             
             range_idxs = list(range(full_length)) if self.sub_idxs is None else self.sub_idxs
             hint_idxs = [] # idxs in cond_idxs
