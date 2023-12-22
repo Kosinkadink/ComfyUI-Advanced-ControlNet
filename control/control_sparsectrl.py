@@ -80,14 +80,35 @@ class SparseControlNet(ControlNetCLDM):
 
 
 class PreprocSparseRGBWrapper:
+    error_msg = "Invalid use of RGB SparseCtrl output. The output of RGB SparseCtrl preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply ControlNet node (advanced or otherwise). It cannot be used for anything else that accepts IMAGE input."
     def __init__(self, condhint: Tensor):
         self.condhint = condhint
     
     def movedim(self, *args, **kwargs):
         return self
 
-    def __getattr__(self, name):
-        raise AttributeError("Invalid use of RGB SparseCtrl output. The output of RGB SparseCtrl preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply ControlNet node (advanced or otherwise).")
+    def __getattr__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __setattr__(self, name, value):
+        if name != "condhint":
+            raise AttributeError(self.error_msg)
+        super().__setattr__(name, value)
+    
+    def __iter__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __next__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+
+    def __len__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __getitem__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __setitem__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
 
 
 class SparseSettings:
