@@ -134,7 +134,7 @@ class VAEEncodePreprocessor:
         return {
             "required": {
                 "image": ("IMAGE", ),
-                "vae": ("VAE", )
+                "vae": ("VAE", ),
             }
         }
 

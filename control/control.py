@@ -227,6 +227,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
         self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
+        self.latent_format = None
     
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -272,6 +273,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             # scale cond_hints to match noisy input
             if self.control_model.use_simplified_conditioning_embedding:
                 # RGB SparseCtrl; the inputs are latents - use bilinear to avoid blocky artifacts
+                sub_cond_hint = self.latent_format.process_in(sub_cond_hint)  # multiplies by model scale factor
                 sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3], x_noisy.shape[2], "bilinear", "center").to(dtype).to(self.device)
             else:
                 # other SparseCtrl; inputs are typical images
@@ -309,10 +311,17 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)
+        self.latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
         if self.control_model.motion_holder is not None:
             self.control_model.motion_holder.motion_wrapper.reset()
             self.control_model.motion_holder.motion_wrapper.set_strength(self.sparse_settings.motion_strength)
             self.control_model.motion_holder.motion_wrapper.set_scale_multiplier(self.sparse_settings.motion_scale)
+
+    def cleanup_advanced(self):
+        super().cleanup_advanced()
+        if self.latent_format is not None:
+            del self.latent_format
+            self.latent_format = None
 
     def copy(self):
         c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)
