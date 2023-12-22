@@ -9,7 +9,7 @@ import comfy.model_detection
 import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
 
-from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod
+from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory)
 from .logger import logger
@@ -228,6 +228,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
         self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
         self.latent_format = None
+        self.preprocessed = False
     
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -311,6 +312,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)
+        if type(self.cond_hint_original) == PreprocSparseRGBWrapper:
+            self.cond_hint_original = self.cond_hint_original.condhint
         self.latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
         if self.control_model.motion_holder is not None:
             self.control_model.motion_holder.motion_wrapper.reset()

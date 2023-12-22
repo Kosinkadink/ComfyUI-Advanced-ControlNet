@@ -9,7 +9,7 @@ from .utils import StrengthInterpolation as SI
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
-from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, VAEEncodePreprocessor
+from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor
 from .logger import logger
 
 
@@ -215,7 +215,7 @@ NODE_CLASS_MAPPINGS = {
     "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
     # SparseCtrl
-    "ACN_VAEEncodePreprocessor": VAEEncodePreprocessor,
+    "ACN_SparseCtrlRGBPreprocessor": RgbSparseCtrlPreprocessor,
     "ACN_SparseCtrlLoaderAdvanced": SparseCtrlLoaderAdvanced,
     "ACN_SparseCtrlMergedLoaderAdvanced": SparseCtrlMergedLoaderAdvanced,
     "ACN_SparseCtrlIndexMethodNode": SparseIndexMethodNode,
@@ -243,7 +243,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Force Default Weights 🛂🅐🅒🅝",
     # SparseCtrl
-    "ACN_VAEEncodePreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
+    "ACN_SparseCtrlRGBPreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
     "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",
     "ACN_SparseCtrlMergedLoaderAdvanced": "Load Merged SparseCtrl Model 🛂🅐🅒🅝",
     "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
