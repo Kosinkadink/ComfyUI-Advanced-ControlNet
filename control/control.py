@@ -274,7 +274,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             if self.control_model.use_simplified_conditioning_embedding:
                 # RGB SparseCtrl; the inputs are latents - use bilinear to avoid blocky artifacts
                 sub_cond_hint = self.latent_format.process_in(sub_cond_hint)  # multiplies by model scale factor
-                sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3], x_noisy.shape[2], "bilinear", "center").to(dtype).to(self.device)
+                sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3], x_noisy.shape[2], "nearest-exact", "center").to(dtype).to(self.device)
             else:
                 # other SparseCtrl; inputs are typical images
                 sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
