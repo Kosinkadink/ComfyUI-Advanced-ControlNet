@@ -313,6 +313,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)
         if type(self.cond_hint_original) == PreprocSparseRGBWrapper:
+            if not self.control_model.use_simplified_conditioning_embedding:
+                raise ValueError("Any model besides RGB SparseCtrl should NOT have its images go through the RGB SparseCtrl preprocessor.")
             self.cond_hint_original = self.cond_hint_original.condhint
         self.latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
         if self.control_model.motion_holder is not None:
@@ -402,6 +404,8 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
     for key in list(controlnet_data.keys()):
         if "temporal" in key:
             motion_data[key] = controlnet_data.pop(key)
+    if len(motion_data) == 0:
+        raise ValueError(f"No motion-related keys in '{ckpt_path}'; not a valid SparseCtrl model!")
     motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data).to(comfy.model_management.unet_dtype())
     missing, unexpected = motion_wrapper.load_state_dict(motion_data)
     if len(missing) > 0 or len(unexpected) > 0:
