@@ -306,6 +306,13 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
         return self.control_merge(None, control, control_prev, output_dtype)
 
+    def pre_run_advanced(self, model, percent_to_timestep_function):
+        super().pre_run_advanced(model, percent_to_timestep_function)
+        if self.control_model.motion_holder is not None:
+            self.control_model.motion_holder.motion_wrapper.reset()
+            self.control_model.motion_holder.motion_wrapper.set_strength(self.sparse_settings.motion_strength)
+            self.control_model.motion_holder.motion_wrapper.set_scale_multiplier(self.sparse_settings.motion_scale)
+
     def copy(self):
         c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)
         self.copy_to(c)

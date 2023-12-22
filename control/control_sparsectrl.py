@@ -80,9 +80,11 @@ class SparseControlNet(ControlNetCLDM):
 
 
 class SparseSettings:
-    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True):
+    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0):
         self.sparse_method = sparse_method
         self.use_motion = use_motion
+        self.motion_strength = motion_strength
+        self.motion_scale = motion_scale
     
     @classmethod
     def default(cls):
@@ -318,18 +320,32 @@ class SparseCtrlMotionWrapper(nn.Module):
             self.mid_block.set_video_length(video_length, full_length)
     
     def set_scale_multiplier(self, multiplier: Union[float, None]):
-        for block in self.down_blocks:
-            block.set_scale_multiplier(multiplier)
-        for block in self.up_blocks:
-            block.set_scale_multiplier(multiplier)
+        if self.down_blocks is not None:
+            for block in self.down_blocks:
+                block.set_scale_multiplier(multiplier)
+        if self.up_blocks is not None:
+            for block in self.up_blocks:
+                block.set_scale_multiplier(multiplier)
         if self.mid_block is not None:
             self.mid_block.set_scale_multiplier(multiplier)
 
+    def set_strength(self, strength: float):
+        if self.down_blocks is not None:
+            for block in self.down_blocks:
+                block.set_strength(strength)
+        if self.up_blocks is not None:
+            for block in self.up_blocks:
+                block.set_strength(strength)
+        if self.mid_block is not None:
+            self.mid_block.set_strength(strength)
+
     def reset_temp_vars(self):
-        for block in self.down_blocks:
-            block.reset_temp_vars()
-        for block in self.up_blocks:
-            block.reset_temp_vars()
+        if self.down_blocks is not None:
+            for block in self.down_blocks:
+                block.reset_temp_vars()
+        if self.up_blocks is not None:
+            for block in self.up_blocks:
+                block.reset_temp_vars()
         if self.mid_block is not None:
             self.mid_block.reset_temp_vars()
 
@@ -375,6 +391,10 @@ class MotionModule(nn.Module):
         for motion_module in self.motion_modules:
             motion_module.set_sub_idxs(sub_idxs)
 
+    def set_strength(self, strength: float):
+        for motion_module in self.motion_modules:
+            motion_module.set_strength(strength)
+
     def reset_temp_vars(self):
         for motion_module in self.motion_modules:
             motion_module.reset_temp_vars()
@@ -399,7 +419,7 @@ class VanillaTemporalModule(nn.Module):
         zero_initialize=True,
     ):
         super().__init__()
-
+        self.strength = 1.0
         self.temporal_transformer = TemporalTransformer3DModel(
             in_channels=in_channels,
             num_attention_heads=num_attention_heads,
@@ -430,11 +450,22 @@ class VanillaTemporalModule(nn.Module):
     def set_sub_idxs(self, sub_idxs: list[int]):
         self.temporal_transformer.set_sub_idxs(sub_idxs)
 
+    def set_strength(self, strength: float):
+        self.strength = strength
+
     def reset_temp_vars(self):
+        self.set_strength(1.0)
         self.temporal_transformer.reset_temp_vars()
 
     def forward(self, input_tensor, encoder_hidden_states=None, attention_mask=None):
-        return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)
+        if math.isclose(self.strength, 1.0):
+            return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)
+        elif math.isclose(self.strength, 0.0):
+            return input_tensor
+        elif self.strength > 1.0:
+            return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength
+        else:
+            return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength + input_tensor*(1.0-self.strength)
 
 
 class TemporalTransformer3DModel(nn.Module):
