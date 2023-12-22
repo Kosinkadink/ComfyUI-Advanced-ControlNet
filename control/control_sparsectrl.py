@@ -80,11 +80,12 @@ class SparseControlNet(ControlNetCLDM):
 
 
 class SparseSettings:
-    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0):
+    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False):
         self.sparse_method = sparse_method
         self.use_motion = use_motion
         self.motion_strength = motion_strength
         self.motion_scale = motion_scale
+        self.merged = merged
     
     @classmethod
     def default(cls):

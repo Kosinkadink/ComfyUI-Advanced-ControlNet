@@ -286,7 +286,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             cond_mask = torch.zeros(cond_shape).to(dtype).to(self.device)
             cond_mask[local_idxs] = 1.0
             # combine cond_hint and cond_mask into (b, c+1, h, w)
-            self.cond_hint = torch.cat([self.cond_hint, cond_mask], dim=1)
+            if not self.sparse_settings.merged:
+                self.cond_hint = torch.cat([self.cond_hint, cond_mask], dim=1)
             del sub_cond_hint
             del cond_mask
         # make cond_hint match x_noisy batch
