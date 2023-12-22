@@ -40,7 +40,6 @@ class SparseControlNet(ControlNetCLDM):
         if self.use_simplified_conditioning_embedding:
             self.input_hint_block = TimestepEmbedSequential(
                 zero_module(operations.conv_nd(self.dims, hint_channels, self.model_channels, 3, padding=1, dtype=self.dtype, device=device)),
-                #zero_module(operations.conv_nd(self.dims, hint_channels, self.model_channels, 3, padding=1, dtype=self.dtype, device=device)),
             )
         self.motion_holder: MotionWrapperHolder = None
     
