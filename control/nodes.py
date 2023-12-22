@@ -10,6 +10,7 @@ from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, Sca
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor
+from .nodes_deprecated import LoadImagesFromDirectory
 from .logger import logger
 
 
@@ -220,6 +221,8 @@ NODE_CLASS_MAPPINGS = {
     "ACN_SparseCtrlMergedLoaderAdvanced": SparseCtrlMergedLoaderAdvanced,
     "ACN_SparseCtrlIndexMethodNode": SparseIndexMethodNode,
     "ACN_SparseCtrlSpreadMethodNode": SparseSpreadMethodNode,
+    # Deprecated
+    "LoadImagesFromDirectory": LoadImagesFromDirectory,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -248,4 +251,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ACN_SparseCtrlMergedLoaderAdvanced": "Load Merged SparseCtrl Model 🛂🅐🅒🅝",
     "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
     "ACN_SparseCtrlSpreadMethodNode": "SparseCtrl Spread Method 🛂🅐🅒🅝",
+    # Deprecated
+    "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝",
 }
