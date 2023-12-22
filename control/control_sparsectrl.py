@@ -144,7 +144,7 @@ class SparseSpreadMethod(SparseMethod):
             if full_length-hint_length < 3:
                 return list(np.linspace(0, full_length-1, hint_length+1, endpoint=True, dtype=int))[:-1]
             # otherwise, get linspace of 2 greater than needed, then cut off first and last
-            return list(np.linspace(0, full_length-1, hint_length, endpoint=True, dtype=int))[1:-1]
+            return list(np.linspace(0, full_length-1, hint_length+2, endpoint=True, dtype=int))[1:-1]
         return ValueError(f"Unrecognized spread: {self.spread}")
 
 
