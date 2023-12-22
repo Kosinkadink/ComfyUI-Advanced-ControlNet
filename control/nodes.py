@@ -3,13 +3,13 @@ from torch import Tensor
 
 import folder_paths
 
-from .control import load_controlnet, convert_to_advanced, ControlWeights, ControlWeightType,\
-    LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup, is_advanced_controlnet
-from .control import StrengthInterpolation as SI
-from .weight_nodes import DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights, \
-    SoftT2IAdapterWeights, CustomT2IAdapterWeights
-from .latent_keyframe_nodes import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
-from .deprecated_nodes import LoadImagesFromDirectory
+from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet
+from .utils import ControlWeights, ControlWeightType, LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup
+from .utils import StrengthInterpolation as SI
+from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
+    SoftT2IAdapterWeights, CustomT2IAdapterWeights)
+from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
+from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor
 from .logger import logger
 
 
@@ -214,8 +214,12 @@ NODE_CLASS_MAPPINGS = {
     "SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
-    # Image
-    "LoadImagesFromDirectory": LoadImagesFromDirectory
+    # SparseCtrl
+    "ACN_SparseCtrlRGBPreprocessor": RgbSparseCtrlPreprocessor,
+    "ACN_SparseCtrlLoaderAdvanced": SparseCtrlLoaderAdvanced,
+    "ACN_SparseCtrlMergedLoaderAdvanced": SparseCtrlMergedLoaderAdvanced,
+    "ACN_SparseCtrlIndexMethodNode": SparseIndexMethodNode,
+    "ACN_SparseCtrlSpreadMethodNode": SparseSpreadMethodNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -238,6 +242,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Force Default Weights 🛂🅐🅒🅝",
-    # Image
-    "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝"
+    # SparseCtrl
+    "ACN_SparseCtrlRGBPreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
+    "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",
+    "ACN_SparseCtrlMergedLoaderAdvanced": "Load Merged SparseCtrl Model 🛂🅐🅒🅝",
+    "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
+    "ACN_SparseCtrlSpreadMethodNode": "SparseCtrl Spread Method 🛂🅐🅒🅝",
 }

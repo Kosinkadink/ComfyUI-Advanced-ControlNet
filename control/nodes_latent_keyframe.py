@@ -2,8 +2,8 @@ from typing import Union
 import numpy as np
 from collections.abc import Iterable
 
-from .control import LatentKeyframe, LatentKeyframeGroup
-from .control import StrengthInterpolation as SI
+from .utils import LatentKeyframe, LatentKeyframeGroup
+from .utils import StrengthInterpolation as SI
 from .logger import logger
 
 
