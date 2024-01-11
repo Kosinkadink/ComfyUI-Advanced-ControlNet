@@ -523,7 +523,10 @@ class AdvancedControlBase:
                         if o[i] is None:
                             o[i] = prev_val
                         else:
-                            o[i] += prev_val
+                            if o[i].shape[0] < prev_val.shape[0]:
+                                o[i] = prev_val + o[i]
+                            else:
+                                o[i] += prev_val
         return out
 
     def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
