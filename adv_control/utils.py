@@ -2,10 +2,13 @@ from typing import Callable, Union
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+
 import comfy.ops
 import comfy.utils
 from comfy.controlnet import ControlBase, broadcast_image_to
+from comfy.model_patcher import ModelPatcher
 
+from .logger import logger
 
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
@@ -262,7 +265,7 @@ class WeightTypeException(TypeError):
 
 
 class AdvancedControlBase:
-    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights):
+    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False):
         self.base = base
         self.compatible_weights = [ControlWeightType.UNIVERSAL]
         self.add_compatible_weight(weights_default.weight_type)
@@ -293,6 +296,14 @@ class AdvancedControlBase:
         self.control_merge = self.control_merge_inject#.__get__(self, type(self))
         self.pre_run = self.pre_run_inject
         self.cleanup = self.cleanup_inject
+        self.set_previous_controlnet = self.set_previous_controlnet_inject
+        # require model to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
+        self.require_model = require_model
+        # disarm - when set to False, used to force usage of Apply Advanced ControlNet 🛂🅐🅒🅝 node (which will set it to True)
+        self.disarmed = not require_model
+    
+    def patch_model(self, model: ModelPatcher):
+        pass
 
     def add_compatible_weight(self, control_weight_type: str):
         self.compatible_weights.append(control_weight_type)
@@ -322,10 +333,10 @@ class AdvancedControlBase:
         self.latent_keyframes = None
 
     def prepare_current_timestep(self, t: Tensor, batched_number: int):
-        self.t = t
+        self.t = float(t[0])
         self.batched_number = batched_number
         # get current step percent
-        curr_t: float = t[0]
+        curr_t: float = self.t
         prev_index = self.current_timestep_index
         # if has next index, loop through and see if need to switch
         if self.timestep_keyframes.has_index(self.current_timestep_index+1):
@@ -395,23 +406,32 @@ class AdvancedControlBase:
         # clear variables
         self.cleanup_advanced()
 
+    def set_previous_controlnet_inject(self, *args, **kwargs):
+        to_return = self.base.set_previous_controlnet(*args, **kwargs)
+        if not self.disarmed:
+            raise Exception(f"Type '{type(self).__name__}' must be used with Apply Advanced ControlNet 🛂🅐🅒🅝 node (with model_optional passed in); otherwise, it will not work.")
+        return to_return
+    
+    def disarm(self):
+        self.disarmed = True
+
     def get_control_inject(self, x_noisy, t, cond, batched_number):
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
         if self.strength == 0.0 or self.current_timestep_keyframe.strength == 0.0:
-            control_prev = None
-            if self.previous_controlnet is not None:
-                control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
-            if control_prev is not None:
-                return control_prev
-            else:
-                return None
+            return self.default_control_actions(x_noisy, t, cond, batched_number)
         # otherwise, perform normal function
         return self.get_control_advanced(x_noisy, t, cond, batched_number)
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
-        pass
+        return self.default_control_actions(x_noisy, t, cond, batched_number)
+
+    def default_control_actions(self, x_noisy, t, cond, batched_number):
+        control_prev = None
+        if self.previous_controlnet is not None:
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+        return control_prev
 
     def calc_weight(self, idx: int, x: Tensor, layers: int) -> Union[float, Tensor]:
         if self.weights.weight_mask is not None:
@@ -424,11 +444,12 @@ class AdvancedControlBase:
     def get_calc_pow(self, idx: int, layers: int) -> int:
         return (layers-1)-idx
 
-    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+    def calc_latent_keyframe_mults(self, x: Tensor, batched_number: int) -> Tensor:
         # apply strengths, and get batch indeces to null out
         # AKA latents that should not be influenced by ControlNet
-        if self.latent_keyframes is not None:
-            latent_count = x.size(0)//batched_number
+        final_mults = [1.0] * x.shape[0]
+        if self.latent_keyframes:
+            latent_count = x.shape[0] // batched_number
             indeces_to_null = set(range(latent_count))
             mapped_indeces = None
             # if expecting subdivision, will need to translate between subset and actual idx values
@@ -459,13 +480,21 @@ class AdvancedControlBase:
 
                 # apply strength for each batched cond/uncond
                 for b in range(batched_number):
-                    x[(latent_count*b)+real_index] = x[(latent_count*b)+real_index] * keyframe.strength
-
+                    final_mults[(latent_count*b)+real_index] = keyframe.strength
             # null them out by multiplying by null_latent_kf_strength
             for batch_index in indeces_to_null:
                 # apply null for each batched cond/uncond
                 for b in range(batched_number):
-                    x[(latent_count*b)+batch_index] = x[(latent_count*b)+batch_index] * self.current_timestep_keyframe.null_latent_kf_strength
+                    final_mults[(latent_count*b)+batch_index] = self.current_timestep_keyframe.null_latent_kf_strength
+        # convert final_mults into tensor and match expected dimension count
+        final_tensor = torch.tensor(final_mults, dtype=x.dtype, device=x.device)
+        while len(final_tensor.shape) < len(x.shape):
+            final_tensor = final_tensor.unsqueeze(-1)
+        return final_tensor
+
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+        if self.latent_keyframes is not None:
+            x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
             masks = prepare_mask_batch(self.mask_cond_hint, x.shape)
@@ -602,3 +631,4 @@ class AdvancedControlBase:
         copied.mask_cond_hint_original = self.mask_cond_hint_original
         copied.weights_override = self.weights_override
         copied.latent_keyframe_override = self.latent_keyframe_override
+        copied.disarmed = self.disarmed

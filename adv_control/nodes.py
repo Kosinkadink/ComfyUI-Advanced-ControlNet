@@ -2,6 +2,7 @@ import numpy as np
 from torch import Tensor
 
 import folder_paths
+from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet
 from .utils import ControlWeights, ControlWeightType, LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup
@@ -136,21 +137,24 @@ class AdvancedControlNetApply:
                 "timestep_kf": ("TIMESTEP_KEYFRAME", ),
                 "latent_kf_override": ("LATENT_KEYFRAME", ),
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
+                "model_optional": ("MODEL",),
             }
         }
 
-    RETURN_TYPES = ("CONDITIONING","CONDITIONING")
-    RETURN_NAMES = ("positive", "negative")
+    RETURN_TYPES = ("CONDITIONING","CONDITIONING","MODEL",)
+    RETURN_NAMES = ("positive", "negative", "model_opt")
     FUNCTION = "apply_controlnet"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent,
-                         mask_optional: Tensor=None,
+                         mask_optional: Tensor=None, model_optional: ModelPatcher=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None):
         if strength == 0:
-            return (positive, negative)
+            return (positive, negative, model_optional)
+        if model_optional:
+            model_optional = model_optional.clone()
 
         control_hint = image.movedim(-1,1)
         cnets = {}
@@ -168,6 +172,13 @@ class AdvancedControlNetApply:
                     # copy, convert to advanced if needed, and set cond
                     c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent))
                     if is_advanced_controlnet(c_net):
+                        # disarm node check
+                        c_net.disarm()
+                        # if model required, verify model is passed in, and if so patch it
+                        if c_net.require_model:
+                            if not model_optional:
+                                raise Exception(f"Type '{type(c_net).__name__}' requires model_optional input, but got None.")
+                            c_net.patch_model(model=model_optional)
                         # apply optional parameters and overrides, if provided
                         if timestep_kf is not None:
                             c_net.set_timestep_keyframes(timestep_kf)
@@ -192,7 +203,7 @@ class AdvancedControlNetApply:
                 n = [t[0], d]
                 c.append(n)
             out.append(c)
-        return (out[0], out[1])
+        return (out[0], out[1], model_optional)
 
 
 # NODE MAPPING
