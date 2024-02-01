@@ -8,8 +8,10 @@ import comfy.model_management
 import comfy.model_detection
 import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
+from model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
+from .control_lllite import LLLiteModule, LLLitePatch
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory)
 from .logger import logger
@@ -106,8 +108,6 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         return indeces[idx]
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
-        # prepare timestep and everything related
-        self.prepare_current_timestep(t=t, batched_number=batched_number)
         try:
             # if sub indexes present, replace original hint with subsection
             if self.sub_idxs is not None:
@@ -166,59 +166,6 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
     def from_vanilla(v: ControlLora, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlLoraAdvanced':
         return ControlLoraAdvanced(control_weights=v.control_weights, timestep_keyframes=timestep_keyframe,
                                    global_average_pooling=v.global_average_pooling, device=v.device)
-
-
-class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
-    # This ControlNet is more of an attention patch than a traditional controlnet
-    # So, the pre_run will be responsible for a lot of the functionality,
-    #     while the usual get_control is mostly used to set some values
-    def __init__(self, timestep_keyframes: TimestepKeyframeGroup, device=None):
-        super().__init__(device)
-        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
-        self.already_patched = False
-
-    def set_cond_hint(self, *args, **kwargs):
-        super().set_cond_hint(*args, **kwargs)
-        # cond hint for LLLite needs to be scaled between (-1, 1) instead of (0, 1)
-        self.cond_hint_original = self.cond_hint_original * 2.0 - 1.0
-
-    def pre_run_advanced(self, model, percent_to_timestep_function):
-        AdvancedControlBase.pre_run_advanced(self, model, percent_to_timestep_function)
-        logger.info(f"In ControlLLLiteAdvanced pre_run_advanced! {self.already_patched}")
-        # perform patches if not already patches
-        if not self.already_patched:
-            self.already_patched = True
-
-    def get_control(self, x_noisy: Tensor, t, cond, batched_number):
-        logger.info("In ControlLLLiteAdvanced get_control!")
-        # prepare timestep and everything related
-        self.prepare_current_timestep(t=t, batched_number=batched_number)
-        # perform other controlnets
-        control_prev = None
-        if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
-        if control_prev is not None:
-            return control_prev
-        else:
-            return None
-    
-    def get_models(self):
-        logger.info(f"In ControlLLLiteAdvanced get_models!")
-        # get_models is called once at the start of every KSampler run - use to reset already_patched status
-        self.already_patched = False
-        out = super().get_models()
-        return out
-
-    def copy(self):
-        c = ControlLLLiteAdvanced(self.timestep_keyframes)
-        self.copy_to(c)
-        self.copy_to_advanced(c)
-        return c
-
-    def cleanup(self):
-        super().cleanup()
-        self.cleanup_advanced()
-        self.already_patched = False
 
 
 class SparseCtrlAdvanced(ControlNetAdvanced):
@@ -335,6 +282,72 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         return c
 
 
+class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
+    # This ControlNet is more of an attention patch than a traditional controlnet
+    def __init__(self, patch: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device=None):
+        super().__init__(device)
+        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), require_model=True)
+        self.patch = patch.clone_with_control(self)
+
+    def patch_model(self, model: ModelPatcher):
+        model.set_model_attn1_patch(self.patch)
+        model.set_model_attn2_patch(self.patch)
+
+    def set_cond_hint(self, *args, **kwargs):
+        to_return = super().set_cond_hint(*args, **kwargs)
+        # cond hint for LLLite needs to be scaled between (-1, 1) instead of (0, 1)
+        self.cond_hint_original = self.cond_hint_original * 2.0 - 1.0
+        return to_return
+
+    def pre_run_advanced(self, *args, **kwargs):
+        AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
+        self.patch.control = self
+    
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
+        # normal ControlNet stuff
+        control_prev = None
+        if self.previous_controlnet is not None:
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+
+        if self.timestep_range is not None:
+            if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
+                return control_prev
+        
+        dtype = x_noisy.dtype
+        # prepare cond_hint
+        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * 8 != self.cond_hint.shape[2] or x_noisy.shape[3] * 8 != self.cond_hint.shape[3]:
+            if self.cond_hint is not None:
+                del self.cond_hint
+            self.cond_hint = None
+            # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
+            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            else:
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+        if x_noisy.shape[0] != self.cond_hint.shape[0]:
+            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+        # prepare mask
+        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
+        # done preparing; model patches will take care of everything now.
+        # return normal controlnet stuff
+        return control_prev
+    
+    def cleanup_advanced(self):
+        super().cleanup_advanced()
+        self.patch.cleanup()
+    
+    def copy(self):
+        c = ControlLLLiteAdvanced(self.patch, self.timestep_keyframes)
+        self.copy_to(c)
+        self.copy_to_advanced(c)
+        return c
+
+    # def get_models(self):
+    #     # get_models is called once at the start of every KSampler run - use to reset already_patched status
+    #     out = super().get_models()
+    #     return out
+
+
 def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, model=None):
     controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
     control = None
@@ -358,9 +371,7 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
 
     if controlnet_type != ControlWeightType.DEFAULT:
         if controlnet_type == ControlWeightType.CONTROLLLLITE:
-            raise NotImplementedError("ControlLLLite has not been fully implemented yet!")
-            control = ControlLLLiteAdvanced(timestep_keyframes=timestep_keyframe)
-            # load Controll
+            control = load_controllllite(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.SPARSECTRL:
             control = load_sparsectrl(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe, model=model)
     # otherwise, load vanilla ControlNet
@@ -541,4 +552,52 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
         motion_wrapper.inject(control_model)
 
     control = SparseCtrlAdvanced(control_model, timestep_keyframes=timestep_keyframe, sparse_settings=sparse_settings, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    return control
+
+
+def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None):
+    if controlnet_data is None:
+        controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+    # adapted from https://github.com/kohya-ss/ControlNet-LLLite-ComfyUI
+    # first, split weights for each module
+    module_weights = {}
+    for key, value in controlnet_data.items():
+        fragments = key.split(".")
+        module_name = fragments[0]
+        weight_name = ".".join(fragments[1:])
+
+        if module_name not in module_weights:
+            module_weights[module_name] = {}
+        module_weights[module_name][weight_name] = value
+    
+    # next, load each module
+    modules = {}
+    for module_name, weights in module_weights.items():
+        # kohya planned to do something about how these should be chosen, so I'm not touching this
+        # since I am not familiar with the logic for this
+        if "conditioning1.4.weight" in weights:
+            depth = 3
+        elif weights["conditioning1.2.weight"].shape[-1] == 4:
+            depth = 2
+        else:
+            depth = 1
+
+        module = LLLiteModule(
+            name=module_name,
+            is_conv2d=weights["down.0.weight"].ndim == 4,
+            in_dim=weights["down.0.weight"].shape[1],
+            depth=depth,
+            cond_emb_dim=weights["conditioning1.0.weight"].shape[0] * 2,
+            mlp_dim=weights["down.0.weight"].shape[0],
+        )
+        # load weights into module
+        module.load_state_dict(weights)
+        modules[module_name] = module
+        if len(modules) == 1:
+            module.is_first = True
+
+    logger.info(f"loaded {ckpt_path} successfully, {len(modules)} modules")
+
+    patch = LLLitePatch(modules=modules)
+    control = ControlLLLiteAdvanced(patch=patch, timestep_keyframes=timestep_keyframe)
     return control
