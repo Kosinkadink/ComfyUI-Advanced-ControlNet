@@ -62,11 +62,6 @@ class LLLitePatch:
         module_pfx_to_k = module_pfx + "_to_k"
         module_pfx_to_v = module_pfx + "_to_v"
 
-        # if masks present, get masks with same dims as attention
-        # if q.shape != k.shape or q.shape != v.shape:
-        #     logger.warn(f"mismatch!!! q:{q.shape}, k:{k.shape}, v:{v.shape}")
-        #logger.warn(f"{q.shape}")
-
         if module_pfx_to_q in self.modules:
             q = q + self.modules[module_pfx_to_q](q, self.control)
         if module_pfx_to_k in self.modules:
