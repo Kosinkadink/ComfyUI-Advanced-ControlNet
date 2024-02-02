@@ -17,17 +17,33 @@ from comfy.ldm.modules.diffusionmodules.util import (
     timestep_embedding,
 )
 
+from comfy.cli_args import args
 from comfy.cldm.cldm import ControlNet as ControlNetCLDM
 from comfy.ldm.modules.attention import SpatialTransformer
-from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential, ResBlock, Downsample
-from comfy.ldm.util import exists
-from comfy.ldm.modules.attention import default, optimized_attention
+from comfy.ldm.modules.attention import attention_basic, attention_pytorch, attention_split, attention_sub_quad, default
 from comfy.ldm.modules.attention import FeedForward, SpatialTransformer
+from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential, ResBlock, Downsample
 from comfy.controlnet import broadcast_image_to
 from comfy.utils import repeat_to_batch_size
 import comfy.ops
+import comfy.model_management
 
 from .utils import TimestepKeyframeGroup, disable_weight_init_clean_groupnorm, prepare_mask_batch
+
+
+# until xformers bug is fixed, do not use xformers for VersatileAttention! TODO: change this when fix is out
+# logic for choosing optimized_attention method taken from comfy/ldm/modules/attention.py
+optimized_attention_mm = attention_basic
+if comfy.model_management.xformers_enabled():
+    pass
+    #optimized_attention_mm = attention_xformers
+if comfy.model_management.pytorch_attention_enabled():
+    optimized_attention_mm = attention_pytorch
+else:
+    if args.use_split_cross_attention:
+        optimized_attention_mm = attention_split
+    else:
+        optimized_attention_mm = attention_sub_quad
 
 
 class SparseControlNet(ControlNetCLDM):
@@ -810,7 +826,7 @@ class CrossAttentionMM(nn.Module):
         if scale_mask is not None:
             k *= scale_mask
 
-        out = optimized_attention(q, k, v, self.heads, mask)
+        out = optimized_attention_mm(q, k, v, self.heads, mask)
         return self.to_out(out)
 
 

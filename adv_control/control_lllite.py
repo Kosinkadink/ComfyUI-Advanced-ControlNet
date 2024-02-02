@@ -48,7 +48,6 @@ class LLLitePatch:
             # it turns out comparing single-value tensors to floats is extremely slow
             # a: Tensor = extra_options["sigmas"][0]
             if self.control.t > self.control.timestep_range[0] or self.control.t < self.control.timestep_range[1]:
-                logger.info("Stopping short!!!")
                 return q, k, v
 
         module_pfx = extra_options_to_module_prefix(extra_options)
@@ -62,11 +61,6 @@ class LLLitePatch:
         module_pfx_to_q = module_pfx + "_to_q"
         module_pfx_to_k = module_pfx + "_to_k"
         module_pfx_to_v = module_pfx + "_to_v"
-
-        # if masks present, get masks with same dims as attention
-        # if q.shape != k.shape or q.shape != v.shape:
-        #     logger.warn(f"mismatch!!! q:{q.shape}, k:{k.shape}, v:{v.shape}")
-        #logger.warn(f"{q.shape}")
 
         if module_pfx_to_q in self.modules:
             q = q + self.modules[module_pfx_to_q](q, self.control)

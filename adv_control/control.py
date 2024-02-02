@@ -301,7 +301,7 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
 
     def pre_run_advanced(self, *args, **kwargs):
         AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
-        self.patch.control = self
+        self.patch.set_control(self)
     
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -341,6 +341,10 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
+    
+    # deepcopy needs to properly keep track of objects to work between model.clone calls!
+    def __deepcopy__(self, *args, **kwargs):
+        return self
 
     # def get_models(self):
     #     # get_models is called once at the start of every KSampler run - use to reset already_patched status
@@ -358,7 +362,6 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
     for key in controlnet_data:
         # LLLLite check
         if "lllite" in key:
-            logger.info("ControlLLLite controlnet!")
             controlnet_type = ControlWeightType.CONTROLLLLITE
             break
         # SparseCtrl check
@@ -596,7 +599,7 @@ def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
         if len(modules) == 1:
             module.is_first = True
 
-    logger.info(f"loaded {ckpt_path} successfully, {len(modules)} modules")
+    #logger.info(f"loaded {ckpt_path} successfully, {len(modules)} modules")
 
     patch = LLLitePatch(modules=modules)
     control = ControlLLLiteAdvanced(patch=patch, timestep_keyframes=timestep_keyframe)
