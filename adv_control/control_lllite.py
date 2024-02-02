@@ -41,6 +41,7 @@ class LLLitePatch:
     def __init__(self, modules: dict[str, 'LLLiteModule'], control: Union[AdvancedControlBase, ControlBase]=None):
         self.modules = modules
         self.control = control
+        #logger.error(f"create LLLitePatch: {id(self)},{control}")
     
     def __call__(self, q, k, v, extra_options):
         # determine if have anything to run
@@ -72,21 +73,25 @@ class LLLitePatch:
         return q, k, v
 
     def to(self, device):
+        #logger.info(f"to... has control? {self.control}")
         for d in self.modules.keys():
             self.modules[d] = self.modules[d].to(device)
         return self
     
     def set_control(self, control: Union[AdvancedControlBase, ControlBase]):
         self.control = control
+        #logger.error(f"set control for LLLitePatch: {id(self)},{id(control)}")
 
     def clone_with_control(self, control: AdvancedControlBase):
+        #logger.error(f"clone-set control for LLLitePatch: {id(self)},{id(control)}")
         return LLLitePatch(self.modules, control)
 
     def cleanup(self):
-        del self.control
-        self.control = None
+        #del self.control
+        #self.control = None
         for module in self.modules.values():
             module.cleanup()
+        #logger.error(f"cleanup LLLitePatch: {id(self)}")
 
 
 # TODO: use comfy.ops to support fp8 properly

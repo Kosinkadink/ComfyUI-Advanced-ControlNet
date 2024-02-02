@@ -302,6 +302,7 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     def pre_run_advanced(self, *args, **kwargs):
         AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
         self.patch.set_control(self)
+        #logger.warn(f"in pre_run_advanced: {id(self)}")
     
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
