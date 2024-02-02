@@ -48,7 +48,6 @@ class LLLitePatch:
             # it turns out comparing single-value tensors to floats is extremely slow
             # a: Tensor = extra_options["sigmas"][0]
             if self.control.t > self.control.timestep_range[0] or self.control.t < self.control.timestep_range[1]:
-                logger.info("Stopping short!!!")
                 return q, k, v
 
         module_pfx = extra_options_to_module_prefix(extra_options)
