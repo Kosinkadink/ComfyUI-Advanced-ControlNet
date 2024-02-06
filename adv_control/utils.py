@@ -11,6 +11,9 @@ from comfy.model_patcher import ModelPatcher
 
 from .logger import logger
 
+BIGMIN = -(2**63-1)
+BIGMAX = (2**63-1)
+
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
         # immediately restore load_torch_file to original version
@@ -273,7 +276,7 @@ def deepcopy_with_sharing(obj, shared_attribute_names, memo=None):
         not calling from within __deepcopy__.
     '''
     assert isinstance(shared_attribute_names, (list, tuple))
-    
+
     shared_attributes = {k: getattr(obj, k) for k in shared_attribute_names}
 
     if hasattr(obj, '__deepcopy__'):

@@ -4,7 +4,7 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageOps
-from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, TimestepKeyframe
+from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, TimestepKeyframe, BIGMAX
 from .logger import logger
 
 
@@ -16,8 +16,8 @@ class LoadImagesFromDirectory:
                 "directory": ("STRING", {"default": ""}),
             },
             "optional": {
-                "image_load_cap": ("INT", {"default": 0, "min": 0, "step": 1}),
-                "start_index": ("INT", {"default": 0, "min": 0, "step": 1}),
+                "image_load_cap": ("INT", {"default": 0, "min": 0, "max": BIGMAX, "step": 1}),
+                "start_index": ("INT", {"default": 0, "min": 0, "max": BIGMAX, "step": 1}),
             }
         }
     
