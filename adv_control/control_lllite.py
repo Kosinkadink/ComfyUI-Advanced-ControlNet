@@ -11,7 +11,7 @@ import comfy.utils
 from comfy.controlnet import ControlBase
 
 from .logger import logger
-from .utils import AdvancedControlBase, prepare_mask_batch
+from .utils import AdvancedControlBase, deepcopy_with_sharing, prepare_mask_batch
 
 
 def extra_options_to_module_prefix(extra_options):
@@ -38,12 +38,16 @@ def extra_options_to_module_prefix(extra_options):
 
 
 class LLLitePatch:
-    def __init__(self, modules: dict[str, 'LLLiteModule'], control: Union[AdvancedControlBase, ControlBase]=None):
+    ATTN1 = "attn1"
+    ATTN2 = "attn2"
+    def __init__(self, modules: dict[str, 'LLLiteModule'], patch_type: str, control: Union[AdvancedControlBase, ControlBase]=None):
         self.modules = modules
         self.control = control
+        self.patch_type = patch_type
         #logger.error(f"create LLLitePatch: {id(self)},{control}")
     
     def __call__(self, q, k, v, extra_options):
+        #logger.error(f"in __call__: {id(self)}")
         # determine if have anything to run
         if self.control.timestep_range is not None:
             # it turns out comparing single-value tensors to floats is extremely slow
@@ -80,18 +84,33 @@ class LLLitePatch:
     
     def set_control(self, control: Union[AdvancedControlBase, ControlBase]):
         self.control = control
-        #logger.error(f"set control for LLLitePatch: {id(self)},{id(control)}")
+        #logger.error(f"set control for LLLitePatch: {id(self)}, cn: {id(control)}")
 
     def clone_with_control(self, control: AdvancedControlBase):
         #logger.error(f"clone-set control for LLLitePatch: {id(self)},{id(control)}")
-        return LLLitePatch(self.modules, control)
+        return LLLitePatch(self.modules, self.patch_type, control)
 
     def cleanup(self):
-        #del self.control
-        #self.control = None
+        #total_cleaned = 0
         for module in self.modules.values():
             module.cleanup()
+        #    total_cleaned += 1
+        #logger.info(f"cleaned modules: {total_cleaned}, {id(self)}")
         #logger.error(f"cleanup LLLitePatch: {id(self)}")
+
+    # make sure deepcopy does not copy control, and deepcopied LLLitePatch should be assigned to control
+    def __deepcopy__(self, memo):
+        self.cleanup()
+        to_return: LLLitePatch = deepcopy_with_sharing(self, shared_attribute_names = ['control'], memo=memo)
+        #logger.warn(f"patch {id(self)} turned into {id(to_return)}")
+        try:
+            if self.patch_type == self.ATTN1:
+                to_return.control.patch_attn1 = to_return
+            elif self.patch_type == self.ATTN2:
+                to_return.control.patch_attn2 = to_return
+        except Exception:
+            pass
+        return to_return
 
 
 # TODO: use comfy.ops to support fp8 properly
@@ -159,6 +178,7 @@ class LLLiteModule(torch.nn.Module):
         self.prev_sub_idxs = None
 
     def cleanup(self):
+        del self.cond_emb
         self.cond_emb = None
         self.cx_shape = None
         self.prev_batch = 0
@@ -167,9 +187,15 @@ class LLLiteModule(torch.nn.Module):
     def forward(self, x: Tensor, control: Union[AdvancedControlBase, ControlBase]):
         mask = None
         mask_tk = None
+        #logger.info(x.shape)
         if self.cond_emb is None or control.sub_idxs != self.prev_sub_idxs or x.shape[0] != self.prev_batch:
             # print(f"cond_emb is None, {self.name}")
-            cx = self.conditioning1(control.cond_hint.to(x.device, dtype=x.dtype))
+            cond_hint = control.cond_hint.to(x.device, dtype=x.dtype)
+            if control.latent_dims_div2 is not None and x.shape[-1] != 1280:
+                cond_hint = comfy.utils.common_upscale(cond_hint, control.latent_dims_div2[0] * 8, control.latent_dims_div2[1] * 8, 'nearest-exact', "center").to(x.device, dtype=x.dtype)
+            elif control.latent_dims_div4 is not None and x.shape[-1] == 1280:
+                cond_hint = comfy.utils.common_upscale(cond_hint, control.latent_dims_div4[0] * 8, control.latent_dims_div4[1] * 8, 'nearest-exact', "center").to(x.device, dtype=x.dtype)
+            cx = self.conditioning1(cond_hint)
             self.cx_shape = cx.shape
             if not self.is_conv2d:
                 # reshape / b,c,h,w -> b,h*w,c
@@ -211,6 +237,7 @@ class LLLiteModule(torch.nn.Module):
         elif mask_tk is not None:
             mask = mask * mask_tk
 
+        #logger.info(f"cs: {cx.shape}, x: {x.shape}, is_conv2d: {self.is_conv2d}")
         cx = torch.cat([cx, self.down(x)], dim=1 if self.is_conv2d else 2)
         cx = self.mid(cx)
         cx = self.up(cx)

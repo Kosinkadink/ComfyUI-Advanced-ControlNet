@@ -2,7 +2,7 @@ from typing import Union
 import numpy as np
 from collections.abc import Iterable
 
-from .utils import LatentKeyframe, LatentKeyframeGroup
+from .utils import LatentKeyframe, LatentKeyframeGroup, BIGMIN, BIGMAX
 from .utils import StrengthInterpolation as SI
 from .logger import logger
 
@@ -12,7 +12,7 @@ class LatentKeyframeNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "batch_index": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1}),
+                "batch_index": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
             },
             "optional": {
@@ -163,8 +163,8 @@ class LatentKeyframeInterpolationNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "batch_index_from": ("INT", {"default": 0, "min": -10000, "max": 10000, "step": 1}),
-                "batch_index_to_excl": ("INT", {"default": 0, "min": -10000, "max": 10000, "step": 1}),
+                "batch_index_from": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
+                "batch_index_to_excl": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
                 "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT], ),
