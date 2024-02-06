@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Callable, Union
 import torch
 from torch import Tensor
@@ -257,6 +258,44 @@ def normalize_min_max(x: Tensor, new_min = 0.0, new_max = 1.0):
 
 def linear_conversion(x, x_min=0.0, x_max=1.0, new_min=0.0, new_max=1.0):
     return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
+
+
+# from https://stackoverflow.com/a/24621200
+def deepcopy_with_sharing(obj, shared_attribute_names, memo=None):
+    '''
+    Deepcopy an object, except for a given list of attributes, which should
+    be shared between the original object and its copy.
+
+    obj is some object
+    shared_attribute_names: A list of strings identifying the attributes that
+        should be shared between the original and its copy.
+    memo is the dictionary passed into __deepcopy__.  Ignore this argument if
+        not calling from within __deepcopy__.
+    '''
+    assert isinstance(shared_attribute_names, (list, tuple))
+    
+    shared_attributes = {k: getattr(obj, k) for k in shared_attribute_names}
+
+    if hasattr(obj, '__deepcopy__'):
+        # Do hack to prevent infinite recursion in call to deepcopy
+        deepcopy_method = obj.__deepcopy__
+        obj.__deepcopy__ = None
+
+    for attr in shared_attribute_names:
+        del obj.__dict__[attr]
+
+    clone = deepcopy(obj)
+
+    for attr, val in shared_attributes.items():
+        setattr(obj, attr, val)
+        setattr(clone, attr, val)
+
+    if hasattr(obj, '__deepcopy__'):
+        # Undo hack
+        obj.__deepcopy__ = deepcopy_method
+        del clone.__deepcopy__
+
+    return clone
 
 
 class WeightTypeException(TypeError):

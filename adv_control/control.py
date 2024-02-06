@@ -284,14 +284,18 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
 class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     # This ControlNet is more of an attention patch than a traditional controlnet
-    def __init__(self, patch: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device=None):
+    def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device=None):
         super().__init__(device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), require_model=True)
-        self.patch = patch.clone_with_control(self)
+        self.patch_attn1 = patch_attn1.clone_with_control(self)
+        self.patch_attn2 = patch_attn2.clone_with_control(self)
+        self.latent_dims_div2 = None
+        self.latent_dims_div4 = None
+        
 
     def patch_model(self, model: ModelPatcher):
-        model.set_model_attn1_patch(self.patch)
-        model.set_model_attn2_patch(self.patch)
+        model.set_model_attn1_patch(self.patch_attn1)
+        model.set_model_attn2_patch(self.patch_attn2)
 
     def set_cond_hint(self, *args, **kwargs):
         to_return = super().set_cond_hint(*args, **kwargs)
@@ -301,7 +305,9 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
 
     def pre_run_advanced(self, *args, **kwargs):
         AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
-        self.patch.set_control(self)
+        #logger.error(f"in cn: {id(self.patch_attn1)},{id(self.patch_attn2)}")
+        self.patch_attn1.set_control(self)
+        self.patch_attn2.set_control(self)
         #logger.warn(f"in pre_run_advanced: {id(self)}")
     
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
@@ -327,6 +333,31 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+        # some special logic here compared to other controlnets:
+        # * The cond_emb in attn patches will divide latent dims by 2 or 4, integer
+        # * Due to this loss, the cond_emb will become smaller than x input if latent dims are not divisble by 2 or 4
+        divisible_by_2_h = x_noisy.shape[2]%2==0
+        divisible_by_2_w = x_noisy.shape[3]%2==0
+        if not (divisible_by_2_h and divisible_by_2_w):
+            #logger.warn(f"{x_noisy.shape} not divisible by 2!")
+            new_h = (x_noisy.shape[2]//2)*2
+            new_w = (x_noisy.shape[3]//2)*2
+            if not divisible_by_2_h:
+                new_h += 2
+            if not divisible_by_2_w:
+                new_w += 2
+            self.latent_dims_div2 = (new_h, new_w)
+        divisible_by_4_h = x_noisy.shape[2]%4==0
+        divisible_by_4_w =  x_noisy.shape[3]%4==0
+        if not (divisible_by_4_h and divisible_by_4_w):
+            #logger.warn(f"{x_noisy.shape} not divisible by 4!")
+            new_h = (x_noisy.shape[2]//4)*4
+            new_w = (x_noisy.shape[3]//4)*4
+            if not divisible_by_4_h:
+                new_h += 4
+            if not divisible_by_4_w:
+                new_w += 4
+            self.latent_dims_div4 = (new_h, new_w)
         # prepare mask
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
         # done preparing; model patches will take care of everything now.
@@ -335,21 +366,26 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     
     def cleanup_advanced(self):
         super().cleanup_advanced()
-        self.patch.cleanup()
+        self.patch_attn1.cleanup()
+        self.patch_attn2.cleanup()
+        self.latent_dims_div2 = None
+        self.latent_dims_div4 = None
     
     def copy(self):
-        c = ControlLLLiteAdvanced(self.patch, self.timestep_keyframes)
+        c = ControlLLLiteAdvanced(self.patch_attn1, self.patch_attn2, self.timestep_keyframes)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
     
     # deepcopy needs to properly keep track of objects to work between model.clone calls!
-    def __deepcopy__(self, *args, **kwargs):
-        return self
+    # def __deepcopy__(self, *args, **kwargs):
+    #     self.cleanup_advanced()
+    #     return self
 
     # def get_models(self):
     #     # get_models is called once at the start of every KSampler run - use to reset already_patched status
     #     out = super().get_models()
+    #     logger.error(f"in get_models! {id(self)}")
     #     return out
 
 
@@ -602,6 +638,7 @@ def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
 
     #logger.info(f"loaded {ckpt_path} successfully, {len(modules)} modules")
 
-    patch = LLLitePatch(modules=modules)
-    control = ControlLLLiteAdvanced(patch=patch, timestep_keyframes=timestep_keyframe)
+    patch_attn1 = LLLitePatch(modules=modules, patch_type=LLLitePatch.ATTN1)
+    patch_attn2 = LLLitePatch(modules=modules, patch_type=LLLitePatch.ATTN2)
+    control = ControlLLLiteAdvanced(patch_attn1=patch_attn1, patch_attn2=patch_attn2, timestep_keyframes=timestep_keyframe)
     return control
