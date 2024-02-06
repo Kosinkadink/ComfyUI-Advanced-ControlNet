@@ -287,8 +287,8 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device=None):
         super().__init__(device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), require_model=True)
-        self.patch_attn1 = patch_attn1.clone_with_control(self)
-        self.patch_attn2 = patch_attn2.clone_with_control(self)
+        self.patch_attn1 = patch_attn1.set_control(self)
+        self.patch_attn2 = patch_attn2.set_control(self)
         self.latent_dims_div2 = None
         self.latent_dims_div4 = None
         

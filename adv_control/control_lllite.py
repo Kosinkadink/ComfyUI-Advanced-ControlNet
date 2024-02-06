@@ -82,8 +82,9 @@ class LLLitePatch:
             self.modules[d] = self.modules[d].to(device)
         return self
     
-    def set_control(self, control: Union[AdvancedControlBase, ControlBase]):
+    def set_control(self, control: Union[AdvancedControlBase, ControlBase]) -> 'LLLitePatch':
         self.control = control
+        return self
         #logger.error(f"set control for LLLitePatch: {id(self)}, cn: {id(control)}")
 
     def clone_with_control(self, control: AdvancedControlBase):
