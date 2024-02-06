@@ -168,6 +168,12 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
                                    global_average_pooling=v.global_average_pooling, device=v.device)
 
 
+
+class SVDControlNetAdvanced(ControlNetAdvanced):
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+
+
 class SparseCtrlAdvanced(ControlNetAdvanced):
     def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
         super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
@@ -396,8 +402,9 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
     controlnet_type = ControlWeightType.DEFAULT
     has_controlnet_key = False
     has_motion_modules_key = False
+    has_temporal_res_block_key = False
     for key in controlnet_data:
-        # LLLLite check
+        # LLLite check
         if "lllite" in key:
             controlnet_type = ControlWeightType.CONTROLLLLITE
             break
@@ -406,14 +413,22 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             has_motion_modules_key = True
         elif "controlnet" in key:
             has_controlnet_key = True
+        # SVD-ControlNet check
+        elif "temporal_res_block" in key:
+            has_temporal_res_block_key = True
     if has_controlnet_key and has_motion_modules_key:
         controlnet_type = ControlWeightType.SPARSECTRL
+    elif has_controlnet_key and has_temporal_res_block_key:
+        controlnet_type = ControlWeightType.SVD_CONTROLNET
 
     if controlnet_type != ControlWeightType.DEFAULT:
         if controlnet_type == ControlWeightType.CONTROLLLLITE:
             control = load_controllllite(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.SPARSECTRL:
             control = load_sparsectrl(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe, model=model)
+        elif controlnet_type == ControlWeightType.SVD_CONTROLNET:
+            raise Exception(f"SVD-ControlNet is not supported yet!")
+            #control = comfy_cn.load_controlnet(ckpt_path, model=model)
     # otherwise, load vanilla ControlNet
     else:
         try:

@@ -38,6 +38,7 @@ class ControlWeightType:
     CONTROLNET = "controlnet"
     CONTROLLORA = "controllora"
     CONTROLLLLITE = "controllllite"
+    SVD_CONTROLNET = "svd_controlnet"
     SPARSECTRL = "sparsectrl"
 
 
