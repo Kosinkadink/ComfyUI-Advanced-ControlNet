@@ -64,7 +64,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
 
-        context = cond['c_crossattn']
+        context = cond.get('crossattn_controlnet', cond['c_crossattn'])
         # uses 'y' in new ComfyUI update
         y = cond.get('y', None)
         if y is None: # TODO: remove this in the future since no longer used by newest ComfyUI
@@ -166,6 +166,12 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
     def from_vanilla(v: ControlLora, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlLoraAdvanced':
         return ControlLoraAdvanced(control_weights=v.control_weights, timestep_keyframes=timestep_keyframe,
                                    global_average_pooling=v.global_average_pooling, device=v.device)
+
+
+
+class SVDControlNetAdvanced(ControlNetAdvanced):
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
 
 
 class SparseCtrlAdvanced(ControlNetAdvanced):
@@ -282,6 +288,60 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         return c
 
 
+class ReferenceAdvanced(ControlBase, AdvancedControlBase):
+    def __init__(self, timestep_keyframes: TimestepKeyframeGroup, device=None):
+        super().__init__(device)
+        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), require_model=True)
+        # TODO: save attn patches here
+    
+    def patch_model(self, model: ModelPatcher):
+        # TODO: do model patching here
+        pass
+
+    def pre_run_advanced(self, *args, **kwargs):
+        AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
+        # TODO: set control on patches
+    
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
+        # normal ControlNet stuff
+        control_prev = None
+        if self.previous_controlnet is not None:
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+
+        if self.timestep_range is not None:
+            if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
+                return control_prev
+        
+        dtype = x_noisy.dtype
+        # prepare cond_hint
+        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * 8 != self.cond_hint.shape[2] or x_noisy.shape[3] * 8 != self.cond_hint.shape[3]:
+            if self.cond_hint is not None:
+                del self.cond_hint
+            self.cond_hint = None
+            # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
+            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            else:
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+        if x_noisy.shape[0] != self.cond_hint.shape[0]:
+            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+        # prepare mask
+        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
+        # done preparing; model patches will take care of everything now.
+        # return normal controlnet stuff
+        return control_prev
+
+    def cleanup_advanced(self):
+        super().cleanup_advanced()
+        # TODO: cleanup patches here
+    
+    def copy(self):
+        c = ReferenceAdvanced(self.timestep_keyframes)
+        self.copy_to(c)
+        self.copy_to_advanced(c)
+        return c
+
+
 class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     # This ControlNet is more of an attention patch than a traditional controlnet
     def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device=None):
@@ -291,7 +351,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.patch_attn2 = patch_attn2.set_control(self)
         self.latent_dims_div2 = None
         self.latent_dims_div4 = None
-        
 
     def patch_model(self, model: ModelPatcher):
         model.set_model_attn1_patch(self.patch_attn1)
@@ -396,8 +455,9 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
     controlnet_type = ControlWeightType.DEFAULT
     has_controlnet_key = False
     has_motion_modules_key = False
+    has_temporal_res_block_key = False
     for key in controlnet_data:
-        # LLLLite check
+        # LLLite check
         if "lllite" in key:
             controlnet_type = ControlWeightType.CONTROLLLLITE
             break
@@ -406,14 +466,22 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             has_motion_modules_key = True
         elif "controlnet" in key:
             has_controlnet_key = True
+        # SVD-ControlNet check
+        elif "temporal_res_block" in key:
+            has_temporal_res_block_key = True
     if has_controlnet_key and has_motion_modules_key:
         controlnet_type = ControlWeightType.SPARSECTRL
+    elif has_controlnet_key and has_temporal_res_block_key:
+        controlnet_type = ControlWeightType.SVD_CONTROLNET
 
     if controlnet_type != ControlWeightType.DEFAULT:
         if controlnet_type == ControlWeightType.CONTROLLLLITE:
             control = load_controllllite(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.SPARSECTRL:
             control = load_sparsectrl(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe, model=model)
+        elif controlnet_type == ControlWeightType.SVD_CONTROLNET:
+            raise Exception(f"SVD-ControlNet is not supported yet!")
+            #control = comfy_cn.load_controlnet(ckpt_path, model=model)
     # otherwise, load vanilla ControlNet
     else:
         try:
