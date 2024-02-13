@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from comfy.cldm.cldm import ControlNet as ControlNetCLDM
 import comfy.model_detection
 from comfy.utils import UNET_MAP_BASIC, UNET_MAP_RESNET, UNET_MAP_ATTENTIONS, TRANSFORMER_BLOCKS
 
@@ -393,17 +392,35 @@ def svd_unet_config_from_diffusers_unet(state_dict: dict[str, Tensor], dtype):
     elif "add_embedding.linear_1.weight" in state_dict:
         match["adm_in_channels"] = state_dict["add_embedding.linear_1.weight"].shape[1]
 
-    # slightly different from normal SD21 (adm_in_channels=768, in_channels=8, both temporal=True, )
-    SVD = {'use_checkpoint': False, 'image_size': 32, 'out_channels': 4, 'use_spatial_transformer': True, 'legacy': False,
-            'adm_in_channels': 768, 'dtype': dtype, 'in_channels': 8, 'model_channels': 320, 'num_res_blocks': [2, 2, 2, 2],
-            'transformer_depth': [1, 1, 1, 1, 1, 1, 0, 0], 'channel_mult': [1, 2, 4, 4], 'transformer_depth_middle': 1, 'use_linear_in_transformer': True,
-            'context_dim': 1024, 'num_head_channels': 64, 'transformer_depth_output': [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-            'use_temporal_attention': True, 'use_temporal_resblock': True}
-    SVD["extra_ff_mix_layer"] = True
-    SVD["use_spatial_context"] = True
-    SVD["merge_strategy"] = "learned_with_images"
-    SVD["merge_factor"] = 0.0
-    SVD["video_kernel_size"] = [3, 1, 1]
+    # based on unet_config of SVD
+    SVD = {
+        'use_checkpoint': False,
+        'image_size': 32,
+        'use_spatial_transformer': True,
+        'legacy': False,
+        'num_classes': 'sequential',
+        'adm_in_channels': 768,
+        'dtype': dtype,
+        'in_channels': 8,
+        'out_channels': 4,
+        'model_channels': 320,
+        'num_res_blocks': [2, 2, 2, 2],
+        'transformer_depth': [1, 1, 1, 1, 1, 1, 0, 0],
+        'transformer_depth_output': [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        'channel_mult': [1, 2, 4, 4],
+        'transformer_depth_middle': 1,
+        'use_linear_in_transformer': True,
+        'context_dim': 1024,
+        'extra_ff_mix_layer': True,
+        'use_spatial_context': True,
+        'merge_strategy': 'learned_with_images',
+        'merge_factor': 0.0,
+        'video_kernel_size': [3, 1, 1],
+        'use_temporal_attention': True,
+        'use_temporal_resblock': True,
+        'num_heads': -1,
+        'num_head_channels': 64,
+        }
 
     supported_models = [SVD]
 
