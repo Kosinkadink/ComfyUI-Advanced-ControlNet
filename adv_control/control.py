@@ -173,6 +173,12 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
     def __init__(self, control_model: SVDControlNet, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
         super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
 
+    def set_cond_hint(self, *args, **kwargs):
+        to_return = super().set_cond_hint(*args, **kwargs)
+        # cond hint for SVD-ControlNet needs to be scaled between (-1, 1) instead of (0, 1)
+        self.cond_hint_original = self.cond_hint_original * 2.0 - 1.0
+        return to_return
+
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
         control_prev = None
         if self.previous_controlnet is not None:
