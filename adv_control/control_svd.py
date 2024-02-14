@@ -307,6 +307,7 @@ class SVDControlNet(nn.Module):
         num_video_frames = cond["num_video_frames"]
         image_only_indicator = cond["image_only_indicator"]
         time_context = cond.get("time_context", None)
+        del cond
 
         guided_hint = self.input_hint_block(hint, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
 
