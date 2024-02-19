@@ -1,5 +1,5 @@
 # ComfyUI-Advanced-ControlNet
-Nodes for scheduling ControlNet strength across timesteps and batched latents, as well as applying custom weights and attention masks. The ControlNet nodes here fully support sliding context sampling, like the one used in the  [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) nodes. Currently supports ControlNets, T2IAdapters, ControlLoRAs, ControlLLLite, and SparseCtrls.
+Nodes for scheduling ControlNet strength across timesteps and batched latents, as well as applying custom weights and attention masks. The ControlNet nodes here fully support sliding context sampling, like the one used in the  [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) nodes. Currently supports ControlNets, T2IAdapters, ControlLoRAs, ControlLLLite, SparseCtrls, and SVD-ControlNets.
 
 Custom weights allow replication of the "My prompt is more important" feature of Auto1111's sd-webui ControlNet extension.
 
@@ -12,6 +12,8 @@ ControlNet preprocessors are available through [comfyui_controlnet_aux](https://
 - ControlNet, T2IAdapter, and ControlLoRA support for sliding context windows.
 - ControlLLLite support (requires model_optional to be passed into and out of Apply Advanced ControlNet node)
 - SparseCtrl support
+- SVD-ControlNet support
+  - Stable Video Diffusion ControlNets trained by **CiaraRowles**: [Depth](https://huggingface.co/CiaraRowles/temporal-controlnet-depth-svd-v1/tree/main/controlnet), [Lineart](https://huggingface.co/CiaraRowles/temporal-controlnet-lineart-svd-v1/tree/main/controlnet)  
 
 ## Table of Contents:
 - [Scheduling Explanation](#scheduling-explanation)
