@@ -12,6 +12,7 @@ from model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
 from .control_lllite import LLLiteModule, LLLitePatch
+from .control_reference import MachineState, ReferenceOptions, ReferenceAttnPatch
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory)
@@ -343,60 +344,6 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
     def copy(self):
         c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)
-        self.copy_to(c)
-        self.copy_to_advanced(c)
-        return c
-
-
-class ReferenceAdvanced(ControlBase, AdvancedControlBase):
-    def __init__(self, timestep_keyframes: TimestepKeyframeGroup, device=None):
-        super().__init__(device)
-        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), require_model=True)
-        # TODO: save attn patches here
-    
-    def patch_model(self, model: ModelPatcher):
-        # TODO: do model patching here
-        pass
-
-    def pre_run_advanced(self, *args, **kwargs):
-        AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
-        # TODO: set control on patches
-    
-    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
-        # normal ControlNet stuff
-        control_prev = None
-        if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
-
-        if self.timestep_range is not None:
-            if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
-                return control_prev
-        
-        dtype = x_noisy.dtype
-        # prepare cond_hint
-        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * 8 != self.cond_hint.shape[2] or x_noisy.shape[3] * 8 != self.cond_hint.shape[3]:
-            if self.cond_hint is not None:
-                del self.cond_hint
-            self.cond_hint = None
-            # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
-            else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
-        if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
-        # prepare mask
-        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
-        # done preparing; model patches will take care of everything now.
-        # return normal controlnet stuff
-        return control_prev
-
-    def cleanup_advanced(self):
-        super().cleanup_advanced()
-        # TODO: cleanup patches here
-    
-    def copy(self):
-        c = ReferenceAdvanced(self.timestep_keyframes)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
