@@ -24,6 +24,7 @@ class MachineState:
     WRITE = "write"
     READ = "read"
     STYLEALIGN = "stylealign"
+    TEST = "test"
 
 
 class ReferenceType:
@@ -152,8 +153,9 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         # noise cond_hint based on sigma (current step)
         # TODO: how to handle noise? reproducibility is key...
         # mess with the order here?
-        self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t[0] / (self.latent_format.scale_factor), noise=None)
+            # / (self.latent_format.scale_factor)
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
+        self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t[0], noise=None)
         #self.cond_hint = simple_noise_latents(self.cond_hint, sigma=t[0], noise=None)
 
         # prepare mask

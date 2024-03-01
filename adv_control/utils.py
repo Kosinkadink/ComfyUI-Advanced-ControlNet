@@ -321,7 +321,9 @@ def ddpm_noise_latents(latents: Tensor, sigma: float, noise: Tensor=None):
     sqrt_alpha_prod = alpha_cumprod ** 0.5
     sqrt_one_minus_alpha_prod = (1 - alpha_cumprod) ** 0.5
     if noise is None:
-        noise = torch.rand_like(latents)
+        generator = torch.cuda.manual_seed(0)
+        noise = torch.empty_like(latents).normal_(generator=generator)
+        #noise = torch.rand_like(latents)
     return latents * sqrt_alpha_prod + noise * sqrt_one_minus_alpha_prod
 
 

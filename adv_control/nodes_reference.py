@@ -2,6 +2,7 @@ from torch import Tensor
 
 from nodes import VAEEncode
 import comfy.utils
+from comfy.sd import VAE
 
 from .control_reference import ReferenceAdvanced, ReferenceAttnPatch, ReferenceOptions, ReferenceType, ReferencePreprocWrapper
 
@@ -46,12 +47,15 @@ class ReferencePreprocessorNode:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/Reference/preprocess"
 
-    def preprocess_images(self, vae, image: Tensor, latent_size: Tensor):
+    def preprocess_images(self, vae: VAE, image: Tensor, latent_size: Tensor):
         # first, resize image to match latents
         image = image.movedim(-1,1)
         image = comfy.utils.common_upscale(image, latent_size["samples"].shape[3] * 8, latent_size["samples"].shape[2] * 8, 'nearest-exact', "center")
         image = image.movedim(1,-1)
         # then, vae encode
-        image = VAEEncode.vae_encode_crop_pixels(image)
+        try:
+            image = vae.vae_encode_crop_pixels(image)
+        except Exception:
+            image = VAEEncode.vae_encode_crop_pixels(image)
         encoded = vae.encode(image[:,:,:,:3])
         return (ReferencePreprocWrapper(condhint=encoded),)
