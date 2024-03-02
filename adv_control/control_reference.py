@@ -93,6 +93,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.ref_opts = ref_opts
         self.order = 0
         self.latent_format = None
+        self.model_sampling_current = None
     
     def get_effective_strength(self):
         effective_strength = self.strength
@@ -115,6 +116,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         if type(self.cond_hint_original) == ReferencePreprocWrapper:
             self.cond_hint_original = self.cond_hint_original.condhint
         self.latent_format = model.latent_format # LatentFormat object, used to process_in latent cond_hint
+        self.model_sampling_current = model.model_sampling
         # SDXL is more sensitive to style_fidelity according to sd-webui-controlnet comments
         if type(model).__name__ == "SDXL":
             self.ref_opts.style_fidelity = self.ref_opts.style_fidelity ** 3.0
@@ -155,7 +157,10 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         # mess with the order here?
             # / (self.latent_format.scale_factor)
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
+        #self.cond_hint = self.model_sampling_current.calculate_input(t, self.cond_hint)
         self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t[0], noise=None)
+        timestep = self.model_sampling_current.timestep(t)
+        #self.cond_hint = ddpm_noise_latents(torch.zeros_like(x_noisy), sigma=t[0], noise=None)
         #self.cond_hint = simple_noise_latents(self.cond_hint, sigma=t[0], noise=None)
 
         # prepare mask
@@ -167,9 +172,10 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
     def cleanup_advanced(self):
         super().cleanup_advanced()
         self.patch_attn1.cleanup()
-        if self.latent_format is not None:
-            del self.latent_format
-            self.latent_format = None
+        del self.latent_format
+        self.latent_format = None
+        del self.model_sampling_current
+        self.model_sampling_current = None
     
     def copy(self):
         c = ReferenceAdvanced(self.patch_attn1, self.ref_opts, self.timestep_keyframes)
@@ -195,8 +201,9 @@ class BankStylesBasicTransformerBlock:
 
 
 class InjectionBasicTransformerBlockHolder:
-    def __init__(self, block: BasicTransformerBlock):
+    def __init__(self, block: BasicTransformerBlock, idx=None):
         self.original_forward = block._forward
+        self.idx = idx
         self.attn_weight = 1.0
         self.bank_styles: dict[int, BankStylesBasicTransformerBlock] = {}
     
@@ -207,26 +214,6 @@ class InjectionBasicTransformerBlockHolder:
         for bank_style in list(self.bank_styles.values()):
             bank_style.clean()
         self.bank_styles.clear()
-
-
-# def factory_clone_injected_ModelPatcher(orig_clone_ModelPatcher: Callable):
-#     def clone_injected_ref(self, *args, **kwargs):
-#         cloned = orig_clone_ModelPatcher(*args, **kwargs)
-#         if InjectMP.is_injected(self):
-#             InjectMP.mark_injected(cloned)
-#             cloned.clone = factory_clone_injected_ModelPatcher(cloned.clone).__get__(cloned, type(cloned))
-#         return cloned
-#     return clone_injected_ref
-
-
-# inject ModelPatcher.clone so that necessary injection will happen when needed
-# orig_modelpatcher_clone = comfy.model_patcher.ModelPatcher.clone
-# def clone_injection_ref(self: ModelPatcher, *args, **kwargs):
-#     cloned = orig_modelpatcher_clone(self, *args, **kwargs)
-#     if InjectMP.is_injected(self):
-#         InjectMP.mark_injected(cloned)
-#     return cloned
-# comfy.model_patcher.ModelPatcher.clone = clone_injection_ref
 
 
 # inject ModelPatcher.patch_model to apply 
@@ -243,12 +230,16 @@ def patch_model_injection_ref(self: ModelPatcher, *args, **kwargs):
                 attn_modules.append(module)
         attn_modules = [module for module in all_modules if isinstance(module, BasicTransformerBlock)]
         attn_modules = sorted(attn_modules, key=lambda x: -x.norm1.normalized_shape[0])
+        reference_injections.attn_modules = []
         for i, module in enumerate(attn_modules):
-            injection_holder = InjectionBasicTransformerBlockHolder(block=module)
+            # if i != 11 and i != 12:
+            #     continue
+            injection_holder = InjectionBasicTransformerBlockHolder(block=module, idx=i)
             injection_holder.attn_weight = float(i) / float(len(attn_modules))
             module._forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
             module.injection_holder = injection_holder
-        reference_injections.attn_modules = attn_modules
+            reference_injections.attn_modules.append(module)
+        
         # handle diffusion_model forward injection
         reference_injections.diffusion_model_orig_forward = self.model.diffusion_model.forward
         self.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(self.model.diffusion_model, type(self.model.diffusion_model))
@@ -286,9 +277,13 @@ class ReferenceInjections:
     
     def clean_module_mem(self):
         for attn_module in self.attn_modules:
-            attn_module.injection_holder.clean()
+            try:
+                attn_module.injection_holder.clean()
+            except Exception:
+                pass
 
     def cleanup(self):
+        self.clean_module_mem()
         del self.attn_modules
         self.attn_modules = []
         self.diffusion_model_orig_forward = None
@@ -323,22 +318,14 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
         control = kwargs.get("control", None)
         transformer_options = kwargs.get("transformer_options", None)
         # look for ReferenceAttnPatch objects to get ReferenceAdvanced objects
-        # and remove the patch from transformer_options so it won't be ran for no reason
         patch_name = "attn1_output_patch"
-        #patch_name = "attn1_patch"
         ref_patches: list[ReferenceAttnPatch] = []
         if "patches" in transformer_options:
             if patch_name in transformer_options["patches"]:
                 patches: list = transformer_options["patches"][patch_name]
-                remove_idxs = []
                 for i in range(len(patches)):
                     if isinstance(patches[i], ReferenceAttnPatch):
                         ref_patches.append(patches[i])
-                        remove_idxs.append(i)
-                # for i in reversed(remove_idxs):
-                #     patches.pop(i)
-                # if len(transformer_options["patches"]["attn1_patch"]) == 0:
-                #      transformer_options["patches"].pop("attn1_patch")
         ref_controlnets: list[ReferenceAdvanced] = [x.control for x in ref_patches]
         # discard any controlnets that should not run
         ref_controlnets = [x for x in ref_controlnets if x.should_run()]
@@ -351,7 +338,10 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             for control in ref_controlnets:
                 transformer_options[REF_MACHINE_STATE] = MachineState.WRITE
                 transformer_options[REF_CONTROL_LIST] = [control]
-                # TODO: insert control's cond_hint
+                # from pathlib import Path
+                # with open(Path(__file__).parent.parent.parent.parent.parent / "ref_debug" / "ref_xt_noised.pt", "rb") as rfile:
+                #     ref_xt = torch.load(rfile, weights_only=True)
+                # diffuse cond_hint
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_CONTROL_LIST] = ref_controlnets
@@ -391,7 +381,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
         if self.is_res:
             x += x_skip
 
-    n = self.norm1(x)
+    n: Tensor = self.norm1(x)
     if self.disable_self_attn:
         context_attn1 = context
     else:
@@ -410,12 +400,17 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             bank_style = self.injection_holder.bank_styles[ref_controlnets[0].order]
             bank_style.bank.append(n.detach().clone())
             bank_style.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
+            # from pathlib import Path
+            # with open(Path(__file__).parent.parent.parent.parent.parent / "ref_debug" / f"bank_{self.injection_holder.idx}.pt", "rb") as rfile:
+            #     raw_val = torch.load(rfile)
+            #     raw_val[0] = raw_val[0].to(n.dtype).to(n.device)
+            #     bank_style.bank.extend(raw_val)
     # create uc_idx_mask
     per_batch = x.shape[0] // len(transformer_options["cond_or_uncond"])
     indiv_conds = []
     for cond_type in transformer_options["cond_or_uncond"]:
         indiv_conds.extend([cond_type] * per_batch)
-    uc_idx_mask = [i for i, x in enumerate(indiv_conds) if x == 0]
+    uc_idx_mask = [i for i, x in enumerate(indiv_conds) if x == 1]
 
     if "attn1_patch" in transformer_patches:
         patch = transformer_patches["attn1_patch"]
@@ -440,7 +435,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             value_attn1 = n
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
-        if ref_machine_state == MachineState.READ:
+        if ref_machine_state == MachineState.READ and self.injection_holder.bank_styles.get(ref_controlnets[0].order, None) is not None:
             bank_styles = self.injection_holder.bank_styles[ref_controlnets[0].order]
             style_fidelity = bank_styles.get_avg_style_fidelity()
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
@@ -464,7 +459,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n = self.attn1.to_out(n)
     else:
         # Reference CN READ - no attn1_replace_patch
-        if ref_machine_state == MachineState.READ:
+        if ref_machine_state == MachineState.READ and self.injection_holder.bank_styles.get(ref_controlnets[0].order, None) is not None:
             if context_attn1 is None:
                 context_attn1 = n
             bank_styles = self.injection_holder.bank_styles[ref_controlnets[0].order]
@@ -472,12 +467,13 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n_uc: Tensor = self.attn1(
                 n,
                 context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
+                #context=torch.cat(bank_styles.bank, dim=1),
                 value=torch.cat([value_attn1] + bank_styles.bank, dim=1) if value_attn1 is not None else value_attn1)
             n_c = n_uc.clone()
-            if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
+            if len(uc_idx_mask) > 0 and style_fidelity > 1e-5:# not math.isclose(style_fidelity, 0.0):
                 n_c[uc_idx_mask] = self.attn1(
                     n[uc_idx_mask],
-                    context=context_attn1[uc_idx_mask] if context_attn1 is not None else context_attn1,
+                    context=n[uc_idx_mask],
                     value=value_attn1[uc_idx_mask] if value_attn1 is not None else value_attn1)
             n = style_fidelity * n_c + (1.0-style_fidelity) * n_uc
             bank_styles.clean()
