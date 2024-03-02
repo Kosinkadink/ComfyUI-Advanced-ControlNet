@@ -473,7 +473,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             if len(uc_idx_mask) > 0 and style_fidelity > 1e-5:# not math.isclose(style_fidelity, 0.0):
                 n_c[uc_idx_mask] = self.attn1(
                     n[uc_idx_mask],
-                    context=n[uc_idx_mask],
+                    context=context_attn1[uc_idx_mask],
                     value=value_attn1[uc_idx_mask] if value_attn1 is not None else value_attn1)
             n = style_fidelity * n_c + (1.0-style_fidelity) * n_uc
             bank_styles.clean()
