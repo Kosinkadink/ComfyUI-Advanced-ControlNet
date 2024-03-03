@@ -305,7 +305,7 @@ class SVDControlNet(nn.Module):
 
         cond = kwargs["cond"]
         num_video_frames = cond["num_video_frames"]
-        image_only_indicator = cond["image_only_indicator"]
+        image_only_indicator = cond.get("image_only_indicator", None)
         time_context = cond.get("time_context", None)
         del cond
 
