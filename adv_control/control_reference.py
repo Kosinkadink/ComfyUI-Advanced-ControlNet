@@ -18,6 +18,8 @@ from .utils import (AdvancedControlBase, ControlWeights, TimestepKeyframeGroup, 
 REF_CONTROL_LIST = "ref_control_list"
 REF_CONTROL_INFO = "ref_control_info"
 REF_MACHINE_STATE = "ref_machine_state"
+REF_COND_IDXS = "ref_cond_idxs"
+REF_UNCOND_IDXS = "ref_uncond_idxs"
 
 
 class MachineState:
@@ -334,6 +336,13 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
         if len(ref_controlnets) == 0:
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
         try:
+            # assign cond and uncond idxs
+            per_batch = x.shape[0] // len(transformer_options["cond_or_uncond"])
+            indiv_conds = []
+            for cond_type in transformer_options["cond_or_uncond"]:
+                indiv_conds.extend([cond_type] * per_batch)
+            transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
+            transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
             # otherwise, need to handle ref controlnet stuff
             for control in ref_controlnets:
                 transformer_options[REF_MACHINE_STATE] = MachineState.WRITE
@@ -342,6 +351,8 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 # with open(Path(__file__).parent.parent.parent.parent.parent / "ref_debug" / "ref_xt_noised.pt", "rb") as rfile:
                 #     ref_xt = torch.load(rfile, weights_only=True)
                 # diffuse cond_hint
+
+
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_CONTROL_LIST] = ref_controlnets
@@ -389,6 +400,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     value_attn1 = None
 
     # Reference CN stuff
+    uc_idx_mask = transformer_options[REF_UNCOND_IDXS]
+    c_idx_mask = transformer_options[REF_COND_IDXS]
     # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
     ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST, None)
     ref_machine_state: str = transformer_options.get(REF_MACHINE_STATE, None)
@@ -405,12 +418,6 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             #     raw_val = torch.load(rfile)
             #     raw_val[0] = raw_val[0].to(n.dtype).to(n.device)
             #     bank_style.bank.extend(raw_val)
-    # create uc_idx_mask
-    per_batch = x.shape[0] // len(transformer_options["cond_or_uncond"])
-    indiv_conds = []
-    for cond_type in transformer_options["cond_or_uncond"]:
-        indiv_conds.extend([cond_type] * per_batch)
-    uc_idx_mask = [i for i, x in enumerate(indiv_conds) if x == 1]
 
     if "attn1_patch" in transformer_patches:
         patch = transformer_patches["attn1_patch"]
@@ -466,7 +473,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             style_fidelity = bank_styles.get_avg_style_fidelity()
             n_uc: Tensor = self.attn1(
                 n,
-                context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
+                #context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
+                context=torch.cat(bank_styles.bank + [context_attn1], dim=1),
                 #context=torch.cat(bank_styles.bank, dim=1),
                 value=torch.cat([value_attn1] + bank_styles.bank, dim=1) if value_attn1 is not None else value_attn1)
             n_c = n_uc.clone()
