@@ -92,8 +92,8 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
 
 class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
-    def __init__(self, t2i_model, timestep_keyframes: TimestepKeyframeGroup, channels_in, device=None):
-        super().__init__(t2i_model=t2i_model, channels_in=channels_in, device=device)
+    def __init__(self, t2i_model, timestep_keyframes: TimestepKeyframeGroup, channels_in, compression_ratio=8, upscale_algorithm="nearest_exact", device=None):
+        super().__init__(t2i_model=t2i_model, channels_in=channels_in, compression_ratio=compression_ratio, upscale_algorithm=upscale_algorithm, device=device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.t2iadapter())
 
     def get_universal_weights(self) -> ControlWeights:
@@ -128,7 +128,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
                 del full_cond_hint_original
 
     def copy(self):
-        c = T2IAdapterAdvanced(self.t2i_model, self.timestep_keyframes, self.channels_in)
+        c = T2IAdapterAdvanced(self.t2i_model, self.timestep_keyframes, self.channels_in, self.compression_ratio, self.upscale_algorithm)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
@@ -139,7 +139,8 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
 
     @staticmethod
     def from_vanilla(v: T2IAdapter, timestep_keyframe: TimestepKeyframeGroup=None) -> 'T2IAdapterAdvanced':
-        return T2IAdapterAdvanced(t2i_model=v.t2i_model, timestep_keyframes=timestep_keyframe, channels_in=v.channels_in, device=v.device)
+        return T2IAdapterAdvanced(t2i_model=v.t2i_model, timestep_keyframes=timestep_keyframe, channels_in=v.channels_in,
+                                  compression_ratio=v.compression_ratio, upscale_algorithm=v.upscale_algorithm, device=v.device)
 
 
 class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
