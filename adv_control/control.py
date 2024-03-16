@@ -523,10 +523,34 @@ def convert_to_advanced(control, timestep_keyframe: TimestepKeyframeGroup=None):
 def is_advanced_controlnet(input_object):
     return hasattr(input_object, "sub_idxs")
 
+def adjust_positional_encoding_parameters(controlnet_data, expected_seq_len):
+    """
+    Adjusts the positional encoding parameters in the model state dict for the expected sequence length.
+    This is a utility function to ensure compatibility with models saved with different configurations.
+    """
+    pe_keys = [key for key in controlnet_data.keys() if "pos_encoder.pe" in key]
+    for key in pe_keys:
+        original_pe = controlnet_data[key]
+        _, seq_len, dim = original_pe.shape
+        if seq_len != expected_seq_len:
+            # Ensure expected_seq_len and dim are integers
+            expected_seq_len = int(expected_seq_len)
+            dim = int(dim)
+
+            # Adjust the positional encoding to match the expected sequence length.
+            adjusted_pe = torch.zeros((1, expected_seq_len, dim))
+            length_to_copy = min(seq_len, expected_seq_len)
+            adjusted_pe[:, :length_to_copy, :] = original_pe[:, :length_to_copy, :]
+            controlnet_data[key] = adjusted_pe
+
 
 def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None, sparse_settings=SparseSettings.default(), model=None) -> SparseCtrlAdvanced:
     if controlnet_data is None:
         controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+    
+    # Adjust positional encoding parameters before loading parts of the model, using the expected_seq_len from sparse_settings
+    adjust_positional_encoding_parameters(controlnet_data, sparse_settings.expected_seq_len)
+
     # first, separate out motion part from normal controlnet part and attempt to load that portion
     motion_data = {}
     for key in list(controlnet_data.keys()):
