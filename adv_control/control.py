@@ -8,7 +8,7 @@ import comfy.model_management
 import comfy.model_detection
 import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
-from model_patcher import ModelPatcher
+from comfy.model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
 from .control_lllite import LLLiteModule, LLLitePatch
