@@ -20,6 +20,7 @@ class SparseCtrlLoaderAdvanced:
                 "use_motion": ("BOOLEAN", {"default": True}, ),
                 "motion_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "motion_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "expected_seq_len": ("INT", {"default": 32.0, "min": 1.0, "step": 1}, ),
             },
             "optional": {
                 "sparse_method": ("SPARSE_METHOD", ),
@@ -32,9 +33,9 @@ class SparseCtrlLoaderAdvanced:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
 
-    def load_controlnet(self, sparsectrl_name: str, use_motion: bool, motion_strength: float, motion_scale: float, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None):
+    def load_controlnet(self, sparsectrl_name: str, use_motion: bool, motion_strength: float, motion_scale: float, expected_seq_len: int = 32, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None):
         sparsectrl_path = folder_paths.get_full_path("controlnet", sparsectrl_name)
-        sparse_settings = SparseSettings(sparse_method=sparse_method, use_motion=use_motion, motion_strength=motion_strength, motion_scale=motion_scale)
+        sparse_settings = SparseSettings(sparse_method=sparse_method, use_motion=use_motion, motion_strength=motion_strength, motion_scale=motion_scale, expected_seq_len=expected_seq_len)
         sparsectrl = load_sparsectrl(sparsectrl_path, timestep_keyframe=tk_optional, sparse_settings=sparse_settings)
         return (sparsectrl,)
 
