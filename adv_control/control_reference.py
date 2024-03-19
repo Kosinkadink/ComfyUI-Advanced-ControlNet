@@ -313,6 +313,9 @@ class InjectMP:
 
 
 def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
+    def forward_inject_UNetModel_test(self, x: Tensor, *args, **kwargs):
+        return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
+
     def forward_inject_UNetModel(self, x: Tensor, *args, **kwargs):
         # get control and transformer_options from kwargs
         real_args = list(args)
@@ -354,6 +357,7 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
 
 
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
+                #reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_CONTROL_LIST] = ref_controlnets
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
@@ -361,6 +365,7 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_module_mem()
 
+    #return forward_inject_UNetModel_test
     return forward_inject_UNetModel
 
 
@@ -400,8 +405,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     value_attn1 = None
 
     # Reference CN stuff
-    uc_idx_mask = transformer_options[REF_UNCOND_IDXS]
-    c_idx_mask = transformer_options[REF_COND_IDXS]
+    uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
+    c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
     # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
     ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST, None)
     ref_machine_state: str = transformer_options.get(REF_MACHINE_STATE, None)
@@ -473,8 +478,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             style_fidelity = bank_styles.get_avg_style_fidelity()
             n_uc: Tensor = self.attn1(
                 n,
-                #context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
-                context=torch.cat(bank_styles.bank + [context_attn1], dim=1),
+                context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
+                #context=torch.cat(bank_styles.bank + [context_attn1], dim=1),
                 #context=torch.cat(bank_styles.bank, dim=1),
                 value=torch.cat([value_attn1] + bank_styles.bank, dim=1) if value_attn1 is not None else value_attn1)
             n_c = n_uc.clone()
