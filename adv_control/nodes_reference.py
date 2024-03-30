@@ -14,7 +14,8 @@ class ReferenceControlNetNode:
         return {
             "required": {
                 "reference_type": (ReferenceType._LIST,),
-                "style_fidelity": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01})
+                "style_fidelity": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "ref_weight": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
         }
     
@@ -23,8 +24,8 @@ class ReferenceControlNetNode:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/Reference"
 
-    def load_controlnet(self, reference_type: str, style_fidelity: float):
-        ref_opts = ReferenceOptions(reference_type=reference_type, style_fidelity=style_fidelity)
+    def load_controlnet(self, reference_type: str, style_fidelity: float, ref_weight: float):
+        ref_opts = ReferenceOptions(reference_type=reference_type, style_fidelity=style_fidelity, ref_weight=ref_weight)
         ref_patch = ReferenceAttnPatch()
         controlnet = ReferenceAdvanced(patch_attn1=ref_patch, ref_opts=ref_opts, timestep_keyframes=None)
         return (controlnet,)

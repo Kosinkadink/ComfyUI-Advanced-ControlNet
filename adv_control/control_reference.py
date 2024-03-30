@@ -39,13 +39,14 @@ class ReferenceType:
 
 
 class ReferenceOptions:
-    def __init__(self, reference_type: str, style_fidelity: float):
+    def __init__(self, reference_type: str, style_fidelity: float, ref_weight: float):
         self.reference_type = reference_type
         self.original_style_fidelity = style_fidelity
         self.style_fidelity = style_fidelity
+        self.ref_weight = ref_weight
     
     def clone(self):
-        return ReferenceOptions(reference_type=self.reference_type, style_fidelity=self.original_style_fidelity)
+        return ReferenceOptions(reference_type=self.reference_type, style_fidelity=self.original_style_fidelity, ref_weight=self.ref_weight)
 
 
 class ReferencePreprocWrapper(AbstractPreprocWrapper):
@@ -96,12 +97,16 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.order = 0
         self.latent_format = None
         self.model_sampling_current = None
+        self.should_apply_effective_strength = True
     
     def get_effective_strength(self):
         effective_strength = self.strength
         if self.current_timestep_keyframe is not None:
             effective_strength = effective_strength * self.current_timestep_keyframe.strength
         return effective_strength
+
+    #def should_apply_effective_strength(self):
+    #    return not (math.isclose(self.strength, 1.0) and math.is_close(self.current_timestep_keyframe.strength, 1.0))
 
     def patch_model(self, model: ModelPatcher):
         # need to patch model so that control can be found later from it
@@ -158,6 +163,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
         self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
+        self.should_apply_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0))
         # prepare mask
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
         # done preparing; model patches will take care of everything now.
@@ -184,6 +190,7 @@ class BankStylesBasicTransformerBlock:
     def __init__(self):
         self.bank = []
         self.style_cfgs = []
+        self.cn_idx: list[int] = []
     
     def get_avg_style_fidelity(self):
         return sum(self.style_cfgs) / float(len(self.style_cfgs))
@@ -193,6 +200,8 @@ class BankStylesBasicTransformerBlock:
         self.bank = []
         del self.style_cfgs
         self.style_cfgs = []
+        del self.cn_idx
+        self.cn_idx = []
 
 
 class InjectionBasicTransformerBlockHolder:
@@ -200,15 +209,13 @@ class InjectionBasicTransformerBlockHolder:
         self.original_forward = block._forward
         self.idx = idx
         self.attn_weight = 1.0
-        self.bank_styles: dict[int, BankStylesBasicTransformerBlock] = {}
+        self.bank_styles = BankStylesBasicTransformerBlock()
     
     def restore(self, block: BasicTransformerBlock):
         block._forward = self.original_forward
 
     def clean(self):
-        for bank_style in list(self.bank_styles.values()):
-            bank_style.clean()
-        self.bank_styles.clear()
+        self.bank_styles.clean()
 
 
 # inject ModelPatcher.patch_model to apply 
@@ -330,7 +337,8 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
         try:
             # assign cond and uncond idxs
-            per_batch = x.shape[0] // len(transformer_options["cond_or_uncond"])
+            batched_number = len(transformer_options["cond_or_uncond"])
+            per_batch = x.shape[0] // batched_number
             indiv_conds = []
             for cond_type in transformer_options["cond_or_uncond"]:
                 indiv_conds.extend([cond_type] * per_batch)
@@ -341,7 +349,11 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 transformer_options[REF_MACHINE_STATE] = MachineState.WRITE
                 transformer_options[REF_CONTROL_LIST] = [control]
 
-                # TODO: handle masks - apply x to locations where masked out
+                # handle masks - apply x to unmasked
+                #strength_mask = torch.ones_like(x, dtype=x.dtype) * control.strength
+                #control.apply_advanced_strengths_and_masks(x=strength_mask, batched_number=batched_number)
+                #real_cond_hint = control.cond_hint * strength_mask + x * (1 - strength_mask)
+
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
                 #reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
@@ -397,12 +409,10 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     ref_machine_state: str = transformer_options.get(REF_MACHINE_STATE, None)
     # if in WRITE mode, save n and style_fidelity
     if ref_controlnets and ref_machine_state == MachineState.WRITE:
-        if ref_controlnets[0].get_effective_strength() > self.injection_holder.attn_weight:
-            if not self.injection_holder.bank_styles.get(ref_controlnets[0].order, None):
-                self.injection_holder.bank_styles[ref_controlnets[0].order] = BankStylesBasicTransformerBlock()
-            bank_style = self.injection_holder.bank_styles[ref_controlnets[0].order]
-            bank_style.bank.append(n.detach().clone())
-            bank_style.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
+        if ref_controlnets[0].ref_opts.ref_weight > self.injection_holder.attn_weight:
+            self.injection_holder.bank_styles.bank.append(n.detach().clone())
+            self.injection_holder.bank_styles.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
+            self.injection_holder.bank_styles.cn_idx.append(ref_controlnets[0].order)
 
     if "attn1_patch" in transformer_patches:
         patch = transformer_patches["attn1_patch"]
@@ -428,13 +438,14 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
         # TODO: test this with a dummy attn1_replace_patch
-        if ref_machine_state == MachineState.READ and self.injection_holder.bank_styles.get(ref_controlnets[0].order, None) is not None:
-            bank_styles = self.injection_holder.bank_styles[ref_controlnets[0].order]
+        if ref_machine_state == MachineState.READ and len(self.injection_holder.bank_styles.bank) > 0:
+            bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity()
+            real_bank = bank_styles.bank.copy()
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
                 n,
-                self.attn1.to_k(torch.cat([context_attn1] + bank_styles.bank, dim=1)),
-                self.attn1.to_v(torch.cat([value_attn1] + bank_styles.bank, dim=1)),
+                self.attn1.to_k(torch.cat([context_attn1] + real_bank, dim=1)),
+                self.attn1.to_v(torch.cat([value_attn1] + real_bank, dim=1)),
                 extra_options))
             n_c = n_uc.clone()
             if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
@@ -452,15 +463,20 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n = self.attn1.to_out(n)
     else:
         # Reference CN READ - no attn1_replace_patch
-        if ref_machine_state == MachineState.READ and self.injection_holder.bank_styles.get(ref_controlnets[0].order, None) is not None:
+        if ref_machine_state == MachineState.READ and len(self.injection_holder.bank_styles.bank) > 0:
             if context_attn1 is None:
                 context_attn1 = n
-            bank_styles = self.injection_holder.bank_styles[ref_controlnets[0].order]
+            bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity()
+            real_bank = bank_styles.bank.copy()
+            for idx, order in enumerate(bank_styles.cn_idx):
+                if ref_controlnets[idx].should_apply_effective_strength:
+                    effective_strength = ref_controlnets[idx].get_effective_strength()
+                    real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc: Tensor = self.attn1(
                 n,
-                context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
-                value=torch.cat([value_attn1] + bank_styles.bank, dim=1) if value_attn1 is not None else value_attn1)
+                context=torch.cat([context_attn1] + real_bank, dim=1),
+                value=torch.cat([value_attn1] + real_bank, dim=1) if value_attn1 is not None else value_attn1)
             n_c = n_uc.clone()
             if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
                 n_c[uc_idx_mask] = self.attn1(
