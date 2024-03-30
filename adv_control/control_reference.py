@@ -442,6 +442,10 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
+            for idx, order in enumerate(bank_styles.cn_idx):
+                if ref_controlnets[idx].should_apply_effective_strength:
+                    effective_strength = ref_controlnets[idx].get_effective_strength()
+                    real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
                 n,
                 self.attn1.to_k(torch.cat([context_attn1] + real_bank, dim=1)),
