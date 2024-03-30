@@ -155,16 +155,9 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_full(self.cond_hint, x_noisy.shape[0], batched_number, except_one=False)
         # noise cond_hint based on sigma (current step)
-        # TODO: how to handle noise? reproducibility is key...
-        # mess with the order here?
-            # / (self.latent_format.scale_factor)
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
-        #self.cond_hint = self.model_sampling_current.calculate_input(t, self.cond_hint)
-        self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t[0], noise=None)
+        self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
-        #self.cond_hint = ddpm_noise_latents(torch.zeros_like(x_noisy), sigma=t[0], noise=None)
-        #self.cond_hint = simple_noise_latents(self.cond_hint, sigma=t[0], noise=None)
-
         # prepare mask
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
         # done preparing; model patches will take care of everything now.
@@ -313,9 +306,6 @@ class InjectMP:
 
 
 def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
-    def forward_inject_UNetModel_test(self, x: Tensor, *args, **kwargs):
-        return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-
     def forward_inject_UNetModel(self, x: Tensor, *args, **kwargs):
         # get control and transformer_options from kwargs
         real_args = list(args)
@@ -350,12 +340,8 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             for control in ref_controlnets:
                 transformer_options[REF_MACHINE_STATE] = MachineState.WRITE
                 transformer_options[REF_CONTROL_LIST] = [control]
-                # from pathlib import Path
-                # with open(Path(__file__).parent.parent.parent.parent.parent / "ref_debug" / "ref_xt_noised.pt", "rb") as rfile:
-                #     ref_xt = torch.load(rfile, weights_only=True)
-                # diffuse cond_hint
 
-
+                # TODO: handle masks - apply x to locations where masked out
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
                 #reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
@@ -365,7 +351,6 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_module_mem()
 
-    #return forward_inject_UNetModel_test
     return forward_inject_UNetModel
 
 
@@ -418,11 +403,6 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             bank_style = self.injection_holder.bank_styles[ref_controlnets[0].order]
             bank_style.bank.append(n.detach().clone())
             bank_style.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
-            # from pathlib import Path
-            # with open(Path(__file__).parent.parent.parent.parent.parent / "ref_debug" / f"bank_{self.injection_holder.idx}.pt", "rb") as rfile:
-            #     raw_val = torch.load(rfile)
-            #     raw_val[0] = raw_val[0].to(n.dtype).to(n.device)
-            #     bank_style.bank.extend(raw_val)
 
     if "attn1_patch" in transformer_patches:
         patch = transformer_patches["attn1_patch"]
@@ -447,6 +427,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             value_attn1 = n
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
+        # TODO: test this with a dummy attn1_replace_patch
         if ref_machine_state == MachineState.READ and self.injection_holder.bank_styles.get(ref_controlnets[0].order, None) is not None:
             bank_styles = self.injection_holder.bank_styles[ref_controlnets[0].order]
             style_fidelity = bank_styles.get_avg_style_fidelity()
@@ -479,11 +460,9 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n_uc: Tensor = self.attn1(
                 n,
                 context=torch.cat([context_attn1] + bank_styles.bank, dim=1),
-                #context=torch.cat(bank_styles.bank + [context_attn1], dim=1),
-                #context=torch.cat(bank_styles.bank, dim=1),
                 value=torch.cat([value_attn1] + bank_styles.bank, dim=1) if value_attn1 is not None else value_attn1)
             n_c = n_uc.clone()
-            if len(uc_idx_mask) > 0 and style_fidelity > 1e-5:# not math.isclose(style_fidelity, 0.0):
+            if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
                 n_c[uc_idx_mask] = self.attn1(
                     n[uc_idx_mask],
                     context=context_attn1[uc_idx_mask],

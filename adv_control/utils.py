@@ -316,24 +316,18 @@ def broadcast_image_to_full(tensor, target_batch_size, batched_number, except_on
         return torch.cat([tensor] * batched_number, dim=0)
 
 
-def ddpm_noise_latents(latents: Tensor, sigma: float, noise: Tensor=None):
+def ddpm_noise_latents(latents: Tensor, sigma: Tensor, noise: Tensor=None):
+    sigma = sigma.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
     alpha_cumprod = 1 / ((sigma * sigma) + 1)
     sqrt_alpha_prod = alpha_cumprod ** 0.5
-    sqrt_one_minus_alpha_prod = (1 - alpha_cumprod) ** 0.5
-    #logger.warn(f"sqrt: {sqrt_alpha_prod}, sqrt-1: {sqrt_one_minus_alpha_prod}, t: {sigma}")
+    sqrt_one_minus_alpha_prod = (1. - alpha_cumprod) ** 0.5
     if noise is None:
-        #noise = torch.randn(latents.size()).to(latents.device)
-        #generator = torch.manual_seed(0)
-        generator = torch.Generator(device="cuda")
-        generator.manual_seed(0)
-        #noise = torch.randn(latents.size(), generator=generator).to(latents.device)
-        #generator = torch.cuda.manual_seed(0)
-        noise = torch.empty_like(latents).normal_(generator=generator).to(latents.device)
-        #noise = torch.empty(latents.size()).normal_(generator=generator).to(latents.device)
-        #return noise
-        #noise = torch.rand_like(latents)
-    #return None
-    #return latents
+        # generator = torch.Generator(device="cuda")
+        # generator.manual_seed(0)
+        # generator = torch.Generator()
+        # generator.manual_seed(0)
+        # noise = torch.randn(latents.size(), generator=generator).to(latents.device)
+        noise = torch.randn_like(latents).to(latents.device)
     return sqrt_alpha_prod * latents + sqrt_one_minus_alpha_prod * noise
 
 
