@@ -275,5 +275,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # LOOSEControl
     #"ACN_ControlNetLoaderWithLoraAdvanced": "Load Adv. ControlNet Model w/ LoRA 🛂🅐🅒🅝",
     # Deprecated
-    "LoadImagesFromDirectory": "Load Images [DEPRECATED] 🛂🅐🅒🅝",
+    "LoadImagesFromDirectory": "🚫Load Images [DEPRECATED] 🛂🅐🅒🅝",
 }

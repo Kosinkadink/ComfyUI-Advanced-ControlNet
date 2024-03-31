@@ -12,8 +12,8 @@ from comfy.model_patcher import ModelPatcher
 
 from .logger import logger
 
-BIGMIN = -(2**63-1)
-BIGMAX = (2**63-1)
+BIGMIN = -(2**53-1)
+BIGMAX = (2**53-1)
 
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
