@@ -24,8 +24,9 @@ class ReferenceControlNetNode:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/Reference"
 
-    def load_controlnet(self, reference_type: str, style_fidelity: float, ref_weight: float):
-        ref_opts = ReferenceOptions(reference_type=reference_type, style_fidelity=style_fidelity, ref_weight=ref_weight)
+    def load_controlnet(self, reference_type: str, style_fidelity: float, ref_weight: float, ref_with_other_cns: bool=False):
+        ref_opts = ReferenceOptions(reference_type=reference_type, style_fidelity=style_fidelity, ref_weight=ref_weight,
+                                    ref_with_other_cns=ref_with_other_cns)
         controlnet = ReferenceAdvanced(ref_opts=ref_opts, timestep_keyframes=None)
         return (controlnet,)
 

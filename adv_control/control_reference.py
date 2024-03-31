@@ -122,14 +122,16 @@ class ReferenceType:
 
 
 class ReferenceOptions:
-    def __init__(self, reference_type: str, style_fidelity: float, ref_weight: float):
+    def __init__(self, reference_type: str, style_fidelity: float, ref_weight: float, ref_with_other_cns: bool=False):
         self.reference_type = reference_type
         self.original_style_fidelity = style_fidelity
         self.style_fidelity = style_fidelity
         self.ref_weight = ref_weight
+        self.ref_with_other_cns = ref_with_other_cns
     
     def clone(self):
-        return ReferenceOptions(reference_type=self.reference_type, style_fidelity=self.original_style_fidelity, ref_weight=self.ref_weight)
+        return ReferenceOptions(reference_type=self.reference_type, style_fidelity=self.original_style_fidelity, ref_weight=self.ref_weight,
+                                ref_with_other_cns=self.ref_with_other_cns)
 
 
 class ReferencePreprocWrapper(AbstractPreprocWrapper):
@@ -308,7 +310,12 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 #strength_mask = torch.ones_like(x, dtype=x.dtype) * control.strength
                 #control.apply_advanced_strengths_and_masks(x=strength_mask, batched_number=batched_number)
                 #real_cond_hint = control.cond_hint * strength_mask + x * (1 - strength_mask)
+                orig_kwargs = kwargs
+                if not control.ref_opts.ref_with_other_cns:
+                    kwargs = kwargs.copy()
+                    kwargs["control"] = None
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
+                kwargs = orig_kwargs
             # run diffusion for real now
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_CONTROL_LIST] = ref_controlnets
