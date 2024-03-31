@@ -4,7 +4,7 @@ from nodes import VAEEncode
 import comfy.utils
 from comfy.sd import VAE
 
-from .control_reference import ReferenceAdvanced, ReferenceAttnPatch, ReferenceOptions, ReferenceType, ReferencePreprocWrapper
+from .control_reference import ReferenceAdvanced, ReferenceOptions, ReferenceType, ReferencePreprocWrapper
 
 
 # node for ReferenceCN
@@ -26,8 +26,7 @@ class ReferenceControlNetNode:
 
     def load_controlnet(self, reference_type: str, style_fidelity: float, ref_weight: float):
         ref_opts = ReferenceOptions(reference_type=reference_type, style_fidelity=style_fidelity, ref_weight=ref_weight)
-        ref_patch = ReferenceAttnPatch()
-        controlnet = ReferenceAdvanced(patch_attn1=ref_patch, ref_opts=ref_opts, timestep_keyframes=None)
+        controlnet = ReferenceAdvanced(ref_opts=ref_opts, timestep_keyframes=None)
         return (controlnet,)
 
 

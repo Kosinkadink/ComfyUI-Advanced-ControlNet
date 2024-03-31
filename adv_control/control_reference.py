@@ -4,6 +4,7 @@ import math
 import torch
 from torch import Tensor
 
+import comfy.sample
 import comfy.model_patcher
 import comfy.utils
 from comfy.controlnet import ControlBase
@@ -15,7 +16,89 @@ from .utils import (AdvancedControlBase, ControlWeights, TimestepKeyframeGroup, 
                     deepcopy_with_sharing, prepare_mask_batch, broadcast_image_to_full, ddpm_noise_latents, simple_noise_latents)
 
 
+def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
+    def get_refcn(control: ControlBase, order: int=-1):
+        ref_set: set[ReferenceAdvanced] = set()
+        if control is None:
+            return ref_set
+        if type(control) == ReferenceAdvanced:
+            control.order = order
+            order -= 1
+            ref_set.add(control)
+        ref_set.update(get_refcn(control.previous_controlnet, order=order))
+        return ref_set
+
+    def refcn_sample(model: ModelPatcher, *args, **kwargs):
+        # check if positive or negative conds contain ref cn
+        positive = args[-3]
+        negative = args[-2]
+        ref_set = set()
+        if positive is not None:
+            for cond in positive:
+                if "control" in cond[1]:
+                    ref_set.update(get_refcn(cond[1]["control"]))
+        if negative is not None:
+            for cond in negative:
+                if "control" in cond[1]:
+                    ref_set.update(get_refcn(cond[1]["control"]))
+        # if no ref cn found, do original function immediately
+        if len(ref_set) == 0:
+            return orig_comfy_sample(model, *args, **kwargs)
+        # otherwise, injection time
+        try:
+            # inject
+            # storage for all Reference-related injections
+            reference_injections = ReferenceInjections()
+            # first, handle attn module injection
+            all_modules = torch_dfs(model.model)
+            attn_modules: list[RefBasicTransformerBlock] = []
+            for module in all_modules:
+                if isinstance(module, BasicTransformerBlock):
+                    attn_modules.append(module)
+            attn_modules = [module for module in all_modules if isinstance(module, BasicTransformerBlock)]
+            attn_modules = sorted(attn_modules, key=lambda x: -x.norm1.normalized_shape[0])
+            reference_injections.attn_modules = []
+            for i, module in enumerate(attn_modules):
+                injection_holder = InjectionBasicTransformerBlockHolder(block=module, idx=i)
+                injection_holder.attn_weight = float(i) / float(len(attn_modules))
+                module._forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
+                module.injection_holder = injection_holder
+                reference_injections.attn_modules.append(module)
+            # handle diffusion_model forward injection
+            reference_injections.diffusion_model_orig_forward = model.model.diffusion_model.forward
+            model.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(model.model.diffusion_model, type(model.model.diffusion_model))
+            # store ordered ref cns in model's transformer options
+            orig_model_options = model.model_options
+            new_model_options = model.model_options.copy()
+            new_model_options["transformer_options"] = model.model_options["transformer_options"].copy()
+            ref_list: list[ReferenceAdvanced] = list(ref_set)
+            new_model_options["transformer_options"][REF_CONTROL_LIST_ALL] = sorted(ref_list, key=lambda x: x.order)
+            model.model_options = new_model_options
+            # continue with original function
+            return orig_comfy_sample(model, *args, **kwargs)
+        finally:
+            # cleanup injections
+            # first, restore attn modules
+            attn_modules: list[RefBasicTransformerBlock] = reference_injections.attn_modules
+            for module in attn_modules:
+                module.injection_holder.restore(module)
+                module.injection_holder.clean()
+                del module.injection_holder
+            del attn_modules
+            # restore diffusion_model forward function
+            model.model.diffusion_model.forward = reference_injections.diffusion_model_orig_forward.__get__(model.model.diffusion_model, type(model.model.diffusion_model))
+            # restore model_options
+            model.model_options = orig_model_options
+            # cleanup
+            reference_injections.cleanup()
+    return refcn_sample
+# inject sample functions
+comfy.sample.sample = refcn_sample_factory(comfy.sample.sample)
+comfy.sample.sample_custom = refcn_sample_factory(comfy.sample.sample_custom, is_custom=True)
+
+
 REF_CONTROL_LIST = "ref_control_list"
+REF_CONTROL_LIST_ALL = "ref_control_list_all"
 REF_CONTROL_INFO = "ref_control_info"
 REF_MACHINE_STATE = "ref_machine_state"
 REF_COND_IDXS = "ref_cond_idxs"
@@ -55,68 +138,22 @@ class ReferencePreprocWrapper(AbstractPreprocWrapper):
         super().__init__(condhint)
 
 
-class ReferenceAttnPatch:
-    def __init__(self, control: 'ReferenceAdvanced'=None):
-        self.control = control
-
-    # def __call__(self, q: Tensor, k: Tensor, v: Tensor, extra_options: dict):
-    #     # do nothing here - all ReferenceAttnPatch is trying to do is be a
-    #     # ComfyUI-compliant way of tracking the corresponding ControlNet obj
-    #     return q, k, v
-    
-    def __call__(self, x: Tensor, extra_options: dict):
-        # do nothing here - all ReferenceAttnPatch is trying to do is be a
-        # ComfyUI-compliant way of tracking the corresponding ControlNet obj
-        return x
-
-    def set_control(self, control: 'ReferenceAdvanced') -> 'ReferenceAttnPatch':
-        self.control = control
-        return self
-
-    def cleanup(self):
-        pass
-
-    # make sure deepcopy does not copy control, and deepcopied patch should be assigned to control
-    def __deepcopy__(self, memo):
-        self.cleanup()
-        to_return: ReferenceAttnPatch = deepcopy_with_sharing(self, shared_attribute_names = ['control'], memo=memo)
-        #logger.warn(f"patch {id(self)} turned into {id(to_return)}")
-        try:
-            to_return.control.patch_attn1 = to_return
-        except Exception:
-            pass
-        return to_return
-
-
 class ReferenceAdvanced(ControlBase, AdvancedControlBase):
-    def __init__(self, patch_attn1: ReferenceAttnPatch, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, device=None):
+    def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, device=None):
         super().__init__(device)
-        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), require_model=True)
-        self.patch_attn1 = patch_attn1.set_control(self)
+        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
         self.ref_opts = ref_opts
         self.order = 0
         self.latent_format = None
         self.model_sampling_current = None
         self.should_apply_effective_strength = True
+        self.ref_latent_keyframe_mults = None
     
     def get_effective_strength(self):
         effective_strength = self.strength
         if self.current_timestep_keyframe is not None:
             effective_strength = effective_strength * self.current_timestep_keyframe.strength
         return effective_strength
-
-    #def should_apply_effective_strength(self):
-    #    return not (math.isclose(self.strength, 1.0) and math.is_close(self.current_timestep_keyframe.strength, 1.0))
-
-    def patch_model(self, model: ModelPatcher):
-        # need to patch model so that control can be found later from it
-        model.set_model_attn1_output_patch(self.patch_attn1)
-        #model.set_model_attn1_patch(self.patch_attn1)
-        # need to add model_options to make patch/unpatch injection know it has to run
-        if not REF_CONTROL_INFO in model.model_options:
-            model.model_options[REF_CONTROL_INFO] = 0
-        self.order = model.model_options[REF_CONTROL_INFO]
-        model.model_options[REF_CONTROL_INFO]
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         AdvancedControlBase.pre_run_advanced(self, model, percent_to_timestep_function)
@@ -129,8 +166,6 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
             self.ref_opts.style_fidelity = self.ref_opts.style_fidelity ** 3.0
         else:
             self.ref_opts.style_fidelity = self.ref_opts.style_fidelity
-        # set control on patches
-        self.patch_attn1.set_control(self)
 
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -164,6 +199,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
         self.should_apply_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0))
+        self.ref_latent_keyframe_mults = self.calc_latent_keyframe_mults(x=x_noisy, batched_number=batched_number)
         # prepare mask
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
         # done preparing; model patches will take care of everything now.
@@ -172,18 +208,22 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def cleanup_advanced(self):
         super().cleanup_advanced()
-        self.patch_attn1.cleanup()
         del self.latent_format
         self.latent_format = None
         del self.model_sampling_current
         self.model_sampling_current = None
     
     def copy(self):
-        c = ReferenceAdvanced(self.patch_attn1, self.ref_opts, self.timestep_keyframes)
+        c = ReferenceAdvanced(self.ref_opts, self.timestep_keyframes)
         c.order = self.order
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
+
+    # avoid deepcopy shenanigans by making deepcopy not do anything to the reference
+    # TODO: do the bookkeeping to do this in a proper way for all Adv-ControlNets
+    def __deepcopy__(self, memo):
+        return self
 
 
 class BankStylesBasicTransformerBlock:
@@ -218,60 +258,6 @@ class InjectionBasicTransformerBlockHolder:
         self.bank_styles.clean()
 
 
-# inject ModelPatcher.patch_model to apply 
-orig_modelpatcher_patch_model = comfy.model_patcher.ModelPatcher.patch_model
-def patch_model_injection_ref(self: ModelPatcher, *args, **kwargs):
-    if REF_CONTROL_INFO in self.model_options:
-        # storage for all Reference-related injections
-        reference_injections = ReferenceInjections()
-        # first, handle attn module injection
-        all_modules = torch_dfs(self.model)
-        attn_modules: list[RefBasicTransformerBlock] = []
-        for module in all_modules:
-            if isinstance(module, BasicTransformerBlock):
-                attn_modules.append(module)
-        attn_modules = [module for module in all_modules if isinstance(module, BasicTransformerBlock)]
-        attn_modules = sorted(attn_modules, key=lambda x: -x.norm1.normalized_shape[0])
-        reference_injections.attn_modules = []
-        for i, module in enumerate(attn_modules):
-            # if i != 11 and i != 12:
-            #     continue
-            injection_holder = InjectionBasicTransformerBlockHolder(block=module, idx=i)
-            injection_holder.attn_weight = float(i) / float(len(attn_modules))
-            module._forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
-            module.injection_holder = injection_holder
-            reference_injections.attn_modules.append(module)
-        
-        # handle diffusion_model forward injection
-        reference_injections.diffusion_model_orig_forward = self.model.diffusion_model.forward
-        self.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(self.model.diffusion_model, type(self.model.diffusion_model))
-        InjectMP.set_injected(self, reference_injections)
-    to_return = orig_modelpatcher_patch_model(self, *args, **kwargs)
-    return to_return
-comfy.model_patcher.ModelPatcher.patch_model = patch_model_injection_ref
-
-
-orig_modelpatcher_unpatch_model = comfy.model_patcher.ModelPatcher.unpatch_model
-def unpatch_model_injection_ref(self: ModelPatcher, *args, **kwargs):
-    if REF_CONTROL_INFO in self.model_options:
-        reference_injections: ReferenceInjections = InjectMP.get_injected(self)
-        # first, restore attn modules
-        attn_modules: list[RefBasicTransformerBlock] = reference_injections.attn_modules
-        for module in attn_modules:
-            module.injection_holder.restore(module)
-            module.injection_holder.clean()
-            del module.injection_holder
-        del attn_modules
-        # restore diffusion_model forward function
-        self.model.diffusion_model.forward = reference_injections.diffusion_model_orig_forward.__get__(self.model.diffusion_model, type(self.model.diffusion_model))
-        # cleanup
-        InjectMP.clean_injected(self)
-        reference_injections.cleanup()
-    to_return = orig_modelpatcher_unpatch_model(self, *args, **kwargs)
-    return to_return
-comfy.model_patcher.ModelPatcher.unpatch_model = unpatch_model_injection_ref
-
-
 class ReferenceInjections:
     def __init__(self, attn_modules: list['RefBasicTransformerBlock']=None):
         self.attn_modules = attn_modules if attn_modules else []
@@ -291,27 +277,6 @@ class ReferenceInjections:
         self.diffusion_model_orig_forward = None
 
 
-class InjectMP:
-    PARAM_INJECTED_REF = "___injected_ref"
-
-    @staticmethod
-    def is_injected(model: ModelPatcher):
-        return getattr(model, InjectMP.PARAM_INJECTED_REF, False)
-
-    def mark_injected(model: ModelPatcher):
-        setattr(model, InjectMP.PARAM_INJECTED_REF, True)
-
-    def set_injected(model: ModelPatcher, value: ReferenceInjections):
-        setattr(model, InjectMP.PARAM_INJECTED_REF, value)
-
-    def get_injected(model: ModelPatcher) -> ReferenceInjections:
-        return getattr(model, InjectMP.PARAM_INJECTED_REF)
-
-    def clean_injected(model: ModelPatcher):
-        delattr(model, InjectMP.PARAM_INJECTED_REF)
-        InjectMP.mark_injected(model)
-
-
 def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
     def forward_inject_UNetModel(self, x: Tensor, *args, **kwargs):
         # get control and transformer_options from kwargs
@@ -320,18 +285,9 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
         control = kwargs.get("control", None)
         transformer_options = kwargs.get("transformer_options", None)
         # look for ReferenceAttnPatch objects to get ReferenceAdvanced objects
-        patch_name = "attn1_output_patch"
-        ref_patches: list[ReferenceAttnPatch] = []
-        if "patches" in transformer_options:
-            if patch_name in transformer_options["patches"]:
-                patches: list = transformer_options["patches"][patch_name]
-                for i in range(len(patches)):
-                    if isinstance(patches[i], ReferenceAttnPatch):
-                        ref_patches.append(patches[i])
-        ref_controlnets: list[ReferenceAdvanced] = [x.control for x in ref_patches]
+        ref_controlnets: list[ReferenceAdvanced] = transformer_options[REF_CONTROL_LIST_ALL]
         # discard any controlnets that should not run
         ref_controlnets = [x for x in ref_controlnets if x.should_run()]
-        ref_controlnets = sorted(ref_controlnets, key=lambda x: x.order)
         # if nothing related to reference controlnets, do nothing special
         if len(ref_controlnets) == 0:
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
@@ -344,18 +300,16 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 indiv_conds.extend([cond_type] * per_batch)
             transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
             transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
-            # otherwise, need to handle ref controlnet stuff
+            # handle running diffusion with ref cond hints
             for control in ref_controlnets:
                 transformer_options[REF_MACHINE_STATE] = MachineState.WRITE
                 transformer_options[REF_CONTROL_LIST] = [control]
-
                 # handle masks - apply x to unmasked
                 #strength_mask = torch.ones_like(x, dtype=x.dtype) * control.strength
                 #control.apply_advanced_strengths_and_masks(x=strength_mask, batched_number=batched_number)
                 #real_cond_hint = control.cond_hint * strength_mask + x * (1 - strength_mask)
-
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
-                #reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
+            # run diffusion for real now
             transformer_options[REF_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_CONTROL_LIST] = ref_controlnets
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
@@ -437,7 +391,6 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             value_attn1 = n
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
-        # TODO: test this with a dummy attn1_replace_patch
         if ref_machine_state == MachineState.READ and len(self.injection_holder.bank_styles.bank) > 0:
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity()
