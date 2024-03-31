@@ -124,7 +124,8 @@ class ReferenceType:
     ATTN_ADAIN = "reference_attn+adain"
     STYLE_ALIGN = "StyleAlign"
 
-    _LIST = [ATTN, ADAIN, ATTN_ADAIN]
+    _LIST = [ATTN]
+    _LIST_FULL = [ATTN, ADAIN, ATTN_ADAIN]
 
 
 class ReferenceOptions:
