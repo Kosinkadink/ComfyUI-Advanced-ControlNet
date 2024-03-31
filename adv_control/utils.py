@@ -3,6 +3,7 @@ from typing import Callable, Union
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+import math
 
 import comfy.ops
 import comfy.utils
@@ -11,8 +12,8 @@ from comfy.model_patcher import ModelPatcher
 
 from .logger import logger
 
-BIGMIN = -(2**63-1)
-BIGMAX = (2**63-1)
+BIGMIN = -(2**53-1)
+BIGMAX = (2**53-1)
 
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
@@ -232,6 +233,38 @@ class TimestepKeyframeGroup:
         return group
 
 
+class AbstractPreprocWrapper:
+    error_msg = "Invalid use of [InsertHere] output. The output of [InsertHere] preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply ControlNet node (advanced or otherwise). It cannot be used for anything else that accepts IMAGE input."
+    def __init__(self, condhint: Tensor):
+        self.condhint = condhint
+    
+    def movedim(self, *args, **kwargs):
+        return self
+
+    def __getattr__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __setattr__(self, name, value):
+        if name != "condhint":
+            raise AttributeError(self.error_msg)
+        super().__setattr__(name, value)
+    
+    def __iter__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __next__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+
+    def __len__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __getitem__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+    
+    def __setitem__(self, *args, **kwargs):
+        raise AttributeError(self.error_msg)
+
+
 # depending on model, AnimateDiff may inject into GroupNorm, so make sure GroupNorm will be clean
 class disable_weight_init_clean_groupnorm(comfy.ops.disable_weight_init):
     class GroupNorm(comfy.ops.disable_weight_init.GroupNorm):
@@ -262,6 +295,46 @@ def normalize_min_max(x: Tensor, new_min = 0.0, new_max = 1.0):
 
 def linear_conversion(x, x_min=0.0, x_max=1.0, new_min=0.0, new_max=1.0):
     return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
+
+
+def broadcast_image_to_full(tensor, target_batch_size, batched_number, except_one=True):
+    current_batch_size = tensor.shape[0]
+    #print(current_batch_size, target_batch_size)
+    if except_one and current_batch_size == 1:
+        return tensor
+
+    per_batch = target_batch_size // batched_number
+    tensor = tensor[:per_batch]
+
+    if per_batch > tensor.shape[0]:
+        tensor = torch.cat([tensor] * (per_batch // tensor.shape[0]) + [tensor[:(per_batch % tensor.shape[0])]], dim=0)
+
+    current_batch_size = tensor.shape[0]
+    if current_batch_size == target_batch_size:
+        return tensor
+    else:
+        return torch.cat([tensor] * batched_number, dim=0)
+
+
+def ddpm_noise_latents(latents: Tensor, sigma: Tensor, noise: Tensor=None):
+    sigma = sigma.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    alpha_cumprod = 1 / ((sigma * sigma) + 1)
+    sqrt_alpha_prod = alpha_cumprod ** 0.5
+    sqrt_one_minus_alpha_prod = (1. - alpha_cumprod) ** 0.5
+    if noise is None:
+        # generator = torch.Generator(device="cuda")
+        # generator.manual_seed(0)
+        # generator = torch.Generator()
+        # generator.manual_seed(0)
+        # noise = torch.randn(latents.size(), generator=generator).to(latents.device)
+        noise = torch.randn_like(latents).to(latents.device)
+    return sqrt_alpha_prod * latents + sqrt_one_minus_alpha_prod * noise
+
+
+def simple_noise_latents(latents: Tensor, sigma: float, noise: Tensor=None):
+    if noise is None:
+        noise = torch.rand_like(latents)
+    return latents + noise * sigma
 
 
 # from https://stackoverflow.com/a/24621200
@@ -458,6 +531,14 @@ class AdvancedControlBase:
     def disarm(self):
         self.disarmed = True
 
+    def should_run(self):
+        if math.isclose(self.strength, 0.0) or math.isclose(self.current_timestep_keyframe.strength, 0.0):
+            return False
+        if self.timestep_range is not None:
+            if self.t > self.timestep_range[0] or self.t < self.timestep_range[1]:
+                return False
+        return True
+
     def get_control_inject(self, x_noisy, t, cond, batched_number):
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
@@ -601,12 +682,12 @@ class AdvancedControlBase:
                                 o[i] += prev_val
         return out
 
-    def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
-        self._prepare_mask("mask_cond_hint", self.mask_cond_hint_original, x_noisy, t, cond, batched_number, dtype)
-        self.prepare_tk_mask_cond_hint(x_noisy, t, cond, batched_number, dtype)
+    def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
+        self._prepare_mask("mask_cond_hint", self.mask_cond_hint_original, x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
+        self.prepare_tk_mask_cond_hint(x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
 
-    def prepare_tk_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
-        return self._prepare_mask("tk_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype)
+    def prepare_tk_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
+        return self._prepare_mask("tk_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
 
     def prepare_weight_mask_cond_hint(self, x_noisy: Tensor, batched_number, dtype=None):
         return self._prepare_mask("weight_mask_cond_hint", self.weights.weight_mask, x_noisy, t=None, cond=None, batched_number=batched_number, dtype=dtype, direct_attn=True)
@@ -615,12 +696,12 @@ class AdvancedControlBase:
         # make mask appropriate dimensions, if present
         if orig_mask is not None:
             out_mask = getattr(self, attr_name)
-            if self.sub_idxs is not None or out_mask is None or x_noisy.shape[2] * 8 != out_mask.shape[1] or x_noisy.shape[3] * 8 != out_mask.shape[2]:
+            multiplier = 1 if direct_attn else 8
+            if self.sub_idxs is not None or out_mask is None or x_noisy.shape[2] * multiplier != out_mask.shape[1] or x_noisy.shape[3] * multiplier != out_mask.shape[2]:
                 self._reset_attr(attr_name)
                 del out_mask
                 # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
                 # resize mask and match batch count
-                multiplier = 1 if direct_attn else 8
                 out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier)
                 actual_latent_length = x_noisy.shape[0] // batched_number
                 out_mask = comfy.utils.repeat_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
