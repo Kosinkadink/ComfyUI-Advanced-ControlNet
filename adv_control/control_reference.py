@@ -64,6 +64,12 @@ def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callab
                 module._forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
                 module.injection_holder = injection_holder
                 reference_injections.attn_modules.append(module)
+            # figure out which module is middle block
+            if hasattr(model.model.diffusion_model, "middle_block"):
+                mid_modules = torch_dfs(model.model.diffusion_model.middle_block)
+                mid_attn_modules: list[RefBasicTransformerBlock] = [module for module in mid_modules if isinstance(module, BasicTransformerBlock)]
+                for module in mid_attn_modules:
+                    module.injection_holder.is_middle = True
             # handle diffusion_model forward injection
             reference_injections.diffusion_model_orig_forward = model.model.diffusion_model.forward
             model.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(model.model.diffusion_model, type(model.model.diffusion_model))
@@ -141,6 +147,8 @@ class ReferencePreprocWrapper(AbstractPreprocWrapper):
 
 
 class ReferenceAdvanced(ControlBase, AdvancedControlBase):
+    CHANNEL_TO_MULT = {320: 1, 640: 2, 1280: 4}
+
     def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, device=None):
         super().__init__(device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
@@ -148,14 +156,32 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.order = 0
         self.latent_format = None
         self.model_sampling_current = None
-        self.should_apply_effective_strength = True
-        self.ref_latent_keyframe_mults = None
+        self.should_apply_effective_strength = False
+        self.should_apply_effective_masks = False
+        self.latent_shape = None
     
+    def any_strength_to_apply(self):
+        return self.should_apply_effective_strength or self.should_apply_effective_masks
+
     def get_effective_strength(self):
         effective_strength = self.strength
         if self.current_timestep_keyframe is not None:
             effective_strength = effective_strength * self.current_timestep_keyframe.strength
         return effective_strength
+    
+    def get_effective_mask_or_float(self, x: Tensor, channels: int, is_mid: bool):
+        if not self.should_apply_effective_masks:
+            return self.get_effective_strength()
+        if is_mid:
+            div = 8
+        else:
+            div = self.CHANNEL_TO_MULT[channels]
+        real_mask = torch.ones([self.latent_shape[0], 1, self.latent_shape[2]//div, self.latent_shape[3]//div]).to(dtype=x.dtype, device=x.device) * self.strength
+        self.apply_advanced_strengths_and_masks(x=real_mask, batched_number=self.batched_number)
+        # mask is now shape [b, 1, h ,w]; need to turn into [b, h*w, 1]
+        b, c, h, w = real_mask.shape
+        real_mask = real_mask.permute(0, 2, 3, 1).reshape(b, h*w, c)
+        return real_mask
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         AdvancedControlBase.pre_run_advanced(self, model, percent_to_timestep_function)
@@ -165,9 +191,9 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.model_sampling_current = model.model_sampling
         # SDXL is more sensitive to style_fidelity according to sd-webui-controlnet comments
         if type(model).__name__ == "SDXL":
-            self.ref_opts.style_fidelity = self.ref_opts.style_fidelity ** 3.0
+            self.ref_opts.style_fidelity = self.ref_opts.original_style_fidelity ** 3.0
         else:
-            self.ref_opts.style_fidelity = self.ref_opts.style_fidelity
+            self.ref_opts.style_fidelity = self.ref_opts.original_style_fidelity
 
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -201,9 +227,10 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
         self.should_apply_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0))
-        self.ref_latent_keyframe_mults = self.calc_latent_keyframe_mults(x=x_noisy, batched_number=batched_number)
-        # prepare mask
-        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
+        # prepare mask - use direct_attn, so the mask dims will match source latents (and be smaller)
+        self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, direct_attn=True)
+        self.should_apply_effective_masks = self.latent_keyframes is not None or self.mask_cond_hint is not None or self.tk_mask_cond_hint is not None
+        self.latent_shape = list(x_noisy.shape)
         # done preparing; model patches will take care of everything now.
         # return normal controlnet stuff
         return control_prev
@@ -214,6 +241,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.latent_format = None
         del self.model_sampling_current
         self.model_sampling_current = None
+        self.should_apply_effective_strength = False
+        self.should_apply_effective_masks = False
     
     def copy(self):
         c = ReferenceAdvanced(self.ref_opts, self.timestep_keyframes)
@@ -251,6 +280,7 @@ class InjectionBasicTransformerBlockHolder:
         self.original_forward = block._forward
         self.idx = idx
         self.attn_weight = 1.0
+        self.is_middle = False
         self.bank_styles = BankStylesBasicTransformerBlock()
     
     def restore(self, block: BasicTransformerBlock):
@@ -403,8 +433,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
             for idx, order in enumerate(bank_styles.cn_idx):
-                if ref_controlnets[idx].should_apply_effective_strength:
-                    effective_strength = ref_controlnets[idx].get_effective_strength()
+                if ref_controlnets[idx].any_strength_to_apply():
+                    effective_strength = ref_controlnets[idx].get_effective_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
                 n,
@@ -434,8 +464,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
             for idx, order in enumerate(bank_styles.cn_idx):
-                if ref_controlnets[idx].should_apply_effective_strength:
-                    effective_strength = ref_controlnets[idx].get_effective_strength()
+                if ref_controlnets[idx].any_strength_to_apply():
+                    effective_strength = ref_controlnets[idx].get_effective_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc: Tensor = self.attn1(
                 n,

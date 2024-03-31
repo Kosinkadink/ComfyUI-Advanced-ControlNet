@@ -682,12 +682,12 @@ class AdvancedControlBase:
                                 o[i] += prev_val
         return out
 
-    def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
-        self._prepare_mask("mask_cond_hint", self.mask_cond_hint_original, x_noisy, t, cond, batched_number, dtype)
-        self.prepare_tk_mask_cond_hint(x_noisy, t, cond, batched_number, dtype)
+    def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
+        self._prepare_mask("mask_cond_hint", self.mask_cond_hint_original, x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
+        self.prepare_tk_mask_cond_hint(x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
 
-    def prepare_tk_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None):
-        return self._prepare_mask("tk_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype)
+    def prepare_tk_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
+        return self._prepare_mask("tk_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
 
     def prepare_weight_mask_cond_hint(self, x_noisy: Tensor, batched_number, dtype=None):
         return self._prepare_mask("weight_mask_cond_hint", self.weights.weight_mask, x_noisy, t=None, cond=None, batched_number=batched_number, dtype=dtype, direct_attn=True)
@@ -696,12 +696,12 @@ class AdvancedControlBase:
         # make mask appropriate dimensions, if present
         if orig_mask is not None:
             out_mask = getattr(self, attr_name)
-            if self.sub_idxs is not None or out_mask is None or x_noisy.shape[2] * 8 != out_mask.shape[1] or x_noisy.shape[3] * 8 != out_mask.shape[2]:
+            multiplier = 1 if direct_attn else 8
+            if self.sub_idxs is not None or out_mask is None or x_noisy.shape[2] * multiplier != out_mask.shape[1] or x_noisy.shape[3] * multiplier != out_mask.shape[2]:
                 self._reset_attr(attr_name)
                 del out_mask
                 # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
                 # resize mask and match batch count
-                multiplier = 1 if direct_attn else 8
                 out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier)
                 actual_latent_length = x_noisy.shape[0] // batched_number
                 out_mask = comfy.utils.repeat_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
