@@ -1,5 +1,5 @@
 # ComfyUI-Advanced-ControlNet
-Nodes for scheduling ControlNet strength across timesteps and batched latents, as well as applying custom weights and attention masks. The ControlNet nodes here fully support sliding context sampling, like the one used in the  [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) nodes. Currently supports ControlNets, T2IAdapters, ControlLoRAs, ControlLLLite, SparseCtrls, and SVD-ControlNets.
+Nodes for scheduling ControlNet strength across timesteps and batched latents, as well as applying custom weights and attention masks. The ControlNet nodes here fully support sliding context sampling, like the one used in the  [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) nodes. Currently supports ControlNets, T2IAdapters, ControlLoRAs, ControlLLLite, SparseCtrls, SVD-ControlNets, and Reference.
 
 Custom weights allow replication of the "My prompt is more important" feature of Auto1111's sd-webui ControlNet extension.
 
@@ -8,12 +8,14 @@ ControlNet preprocessors are available through [comfyui_controlnet_aux](https://
 ## Features
 - Timestep and latent strength scheduling
 - Attention masks
-- Soft weights to replicate "My prompt is more important" feature from sd-webui ControlNet extension, and also change the scaling.
-- ControlNet, T2IAdapter, and ControlLoRA support for sliding context windows.
+- Soft weights to replicate "My prompt is more important" feature from sd-webui ControlNet extension, and also change the scaling
+- ControlNet, T2IAdapter, and ControlLoRA support for sliding context windows
 - ControlLLLite support (requires model_optional to be passed into and out of Apply Advanced ControlNet node)
 - SparseCtrl support
 - SVD-ControlNet support
   - Stable Video Diffusion ControlNets trained by **CiaraRowles**: [Depth](https://huggingface.co/CiaraRowles/temporal-controlnet-depth-svd-v1/tree/main/controlnet), [Lineart](https://huggingface.co/CiaraRowles/temporal-controlnet-lineart-svd-v1/tree/main/controlnet)  
+- Reference support
+  - Currently, only ```reference_attn``` is exposed (equivalent of reference_only in Auto1111), reference_adain (and +attn) under construction. ```style_fidelity``` and ```ref_weight``` are equivalent to style_fidelity and control_weight in Auto1111, respectively, and strength of the Apply ControlNet is the balance between ref-influenced result and no-ref result.
 
 ## Table of Contents:
 - [Scheduling Explanation](#scheduling-explanation)
