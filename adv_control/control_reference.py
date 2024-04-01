@@ -179,16 +179,39 @@ class ReferenceType:
 
 
 class ReferenceOptions:
-    def __init__(self, reference_type: str, style_fidelity: float, ref_weight: float, ref_with_other_cns: bool=False):
+    def __init__(self, reference_type: str,
+                 attn_style_fidelity: float, adain_style_fidelity: float,
+                 attn_ref_weight: float, adain_ref_weight: float,
+                 attn_strength: float=1.0, adain_strength: float=1.0,
+                 ref_with_other_cns: bool=False):
         self.reference_type = reference_type
-        self.original_style_fidelity = style_fidelity
-        self.style_fidelity = style_fidelity
-        self.ref_weight = ref_weight
+        # attn
+        self.original_attn_style_fidelity = attn_style_fidelity
+        self.attn_style_fidelity = attn_style_fidelity
+        self.attn_ref_weight = attn_ref_weight
+        self.attn_strength = attn_strength
+        # adain
+        self.original_adain_style_fidelity = adain_style_fidelity
+        self.adain_style_fidelity = adain_style_fidelity
+        self.adain_ref_weight = adain_ref_weight
+        self.adain_strength = adain_strength
+        # other
         self.ref_with_other_cns = ref_with_other_cns
     
     def clone(self):
-        return ReferenceOptions(reference_type=self.reference_type, style_fidelity=self.original_style_fidelity, ref_weight=self.ref_weight,
+        return ReferenceOptions(reference_type=self.reference_type,
+                                attn_style_fidelity=self.original_attn_style_fidelity, adain_style_fidelity=self.original_adain_style_fidelity,
+                                attn_ref_weight=self.attn_ref_weight, adain_ref_weight=self.adain_ref_weight,
+                                attn_strength=self.attn_strength, adain_strength=self.adain_strength,
                                 ref_with_other_cns=self.ref_with_other_cns)
+
+    @staticmethod
+    def create_combo(reference_type: str, style_fidelity: float, ref_weight: float, ref_with_other_cns: bool=False):
+        return ReferenceOptions(reference_type=reference_type,
+                                attn_style_fidelity=style_fidelity, adain_style_fidelity=style_fidelity,
+                                attn_ref_weight=ref_weight, adain_ref_weight=ref_weight,
+                                ref_with_other_cns=ref_with_other_cns)
+
 
 
 class ReferencePreprocWrapper(AbstractPreprocWrapper):
@@ -207,27 +230,31 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.order = 0
         self.latent_format = None
         self.model_sampling_current = None
-        self.should_apply_effective_strength = False
+        self.should_apply_attn_effective_strength = False
+        self.should_apply_adain_effective_strength = False
         self.should_apply_effective_masks = False
         self.latent_shape = None
+
+    def any_attn_strength_to_apply(self):
+        return self.should_apply_attn_effective_strength or self.should_apply_effective_masks
     
-    def any_strength_to_apply(self):
-        return self.should_apply_effective_strength or self.should_apply_effective_masks
+    def any_adain_strength_to_apply(self):
+        return self.should_apply_adain_effective_strength or self.should_apply_effective_masks
 
     def get_effective_strength(self):
         effective_strength = self.strength
         if self.current_timestep_keyframe is not None:
             effective_strength = effective_strength * self.current_timestep_keyframe.strength
         return effective_strength
-    
+
     def get_effective_attn_mask_or_float(self, x: Tensor, channels: int, is_mid: bool):
         if not self.should_apply_effective_masks:
-            return self.get_effective_strength()
+            return self.get_effective_strength() * self.ref_opts.attn_strength
         if is_mid:
             div = 8
         else:
             div = self.CHANNEL_TO_MULT[channels]
-        real_mask = torch.ones([self.latent_shape[0], 1, self.latent_shape[2]//div, self.latent_shape[3]//div]).to(dtype=x.dtype, device=x.device) * self.strength
+        real_mask = torch.ones([self.latent_shape[0], 1, self.latent_shape[2]//div, self.latent_shape[3]//div]).to(dtype=x.dtype, device=x.device) * self.strength * self.ref_opts.attn_strength
         self.apply_advanced_strengths_and_masks(x=real_mask, batched_number=self.batched_number)
         # mask is now shape [b, 1, h ,w]; need to turn into [b, h*w, 1]
         b, c, h, w = real_mask.shape
@@ -236,9 +263,9 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def get_effective_adain_mask_or_float(self, x: Tensor):
         if not self.should_apply_effective_masks:
-            return self.get_effective_strength()
+            return self.get_effective_strength() * self.ref_opts.adain_strength
         b, c, h, w = x.shape
-        real_mask = torch.ones([b, 1, h, w]).to(dtype=x.dtype, device=x.device) * self.strength
+        real_mask = torch.ones([b, 1, h, w]).to(dtype=x.dtype, device=x.device) * self.strength * self.ref_opts.adain_strength
         self.apply_advanced_strengths_and_masks(x=real_mask, batched_number=self.batched_number)
         return real_mask
 
@@ -250,9 +277,11 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.model_sampling_current = model.model_sampling
         # SDXL is more sensitive to style_fidelity according to sd-webui-controlnet comments
         if type(model).__name__ == "SDXL":
-            self.ref_opts.style_fidelity = self.ref_opts.original_style_fidelity ** 3.0
+            self.ref_opts.attn_style_fidelity = self.ref_opts.original_attn_style_fidelity ** 3.0
+            self.ref_opts.adain_style_fidelity = self.ref_opts.original_adain_style_fidelity ** 3.0
         else:
-            self.ref_opts.style_fidelity = self.ref_opts.original_style_fidelity
+            self.ref_opts.attn_style_fidelity = self.ref_opts.original_attn_style_fidelity
+            self.ref_opts.adain_style_fidelity = self.ref_opts.original_adain_style_fidelity
 
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -285,7 +314,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
         self.cond_hint = ref_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
-        self.should_apply_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0))
+        self.should_apply_attn_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.attn_strength, 1.0))
+        self.should_apply_adain_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.adain_strength, 1.0))
         # prepare mask - use direct_attn, so the mask dims will match source latents (and be smaller)
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, direct_attn=True)
         self.should_apply_effective_masks = self.latent_keyframes is not None or self.mask_cond_hint is not None or self.tk_mask_cond_hint is not None
@@ -300,7 +330,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.latent_format = None
         del self.model_sampling_current
         self.model_sampling_current = None
-        self.should_apply_effective_strength = False
+        self.should_apply_attn_effective_strength = False
+        self.should_apply_adain_effective_strength = False
         self.should_apply_effective_masks = False
     
     def copy(self):
@@ -557,9 +588,9 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     ref_machine_state: str = transformer_options.get(REF_ATTN_MACHINE_STATE, None)
     # if in WRITE mode, save n and style_fidelity
     if ref_controlnets and ref_machine_state == MachineState.WRITE:
-        if ref_controlnets[0].ref_opts.ref_weight > self.injection_holder.attn_weight:
+        if ref_controlnets[0].ref_opts.attn_ref_weight > self.injection_holder.attn_weight:
             self.injection_holder.bank_styles.bank.append(n.detach().clone())
-            self.injection_holder.bank_styles.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
+            self.injection_holder.bank_styles.style_cfgs.append(ref_controlnets[0].ref_opts.attn_style_fidelity)
             self.injection_holder.bank_styles.cn_idx.append(ref_controlnets[0].order)
 
     if "attn1_patch" in transformer_patches:
@@ -590,7 +621,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
             for idx, order in enumerate(bank_styles.cn_idx):
-                if ref_controlnets[idx].any_strength_to_apply():
+                if ref_controlnets[idx].any_attn_strength_to_apply():
                     effective_strength = ref_controlnets[idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
@@ -621,7 +652,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
             for idx, order in enumerate(bank_styles.cn_idx):
-                if ref_controlnets[idx].any_strength_to_apply():
+                if ref_controlnets[idx].any_attn_strength_to_apply():
                     effective_strength = ref_controlnets[idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc: Tensor = self.attn1(
@@ -715,11 +746,11 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
         
         # if in WRITE mode, save var, mean, and style_cfg
         if ref_machine_state == MachineState.WRITE:
-            if ref_controlnets[0].ref_opts.ref_weight > ts.injection_holder.gn_weight:
+            if ref_controlnets[0].ref_opts.adain_ref_weight > ts.injection_holder.gn_weight:
                 var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
                 ts.injection_holder.bank_styles.var_bank.append(var)
                 ts.injection_holder.bank_styles.mean_bank.append(mean)
-                ts.injection_holder.bank_styles.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
+                ts.injection_holder.bank_styles.style_cfgs.append(ref_controlnets[0].ref_opts.adain_style_fidelity)
                 ts.injection_holder.bank_styles.cn_idx.append(ref_controlnets[0].order)
         # if in READ mode, do math with saved var, mean, and style_cfg
         if ref_machine_state == MachineState.READ:
@@ -733,7 +764,7 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
                 mean_acc = bank_styles.get_avg_mean_bank()
                 std_acc = torch.maximum(var_acc, torch.zeros_like(var_acc) + eps) ** 0.5
                 y_uc = (((x - mean) / std) * std_acc) + mean_acc
-                if ref_controlnets[0].any_strength_to_apply():
+                if ref_controlnets[0].any_adain_strength_to_apply():
                     effective_strength = ref_controlnets[0].get_effective_adain_mask_or_float(x=x)
                     y_uc = y_uc * effective_strength + x * (1-effective_strength)
                 y_c = y_uc.clone()

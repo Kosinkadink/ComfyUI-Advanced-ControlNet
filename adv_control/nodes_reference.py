@@ -24,9 +24,38 @@ class ReferenceControlNetNode:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/Reference"
 
-    def load_controlnet(self, reference_type: str, style_fidelity: float, ref_weight: float, ref_with_other_cns: bool=False):
-        ref_opts = ReferenceOptions(reference_type=reference_type, style_fidelity=style_fidelity, ref_weight=ref_weight,
-                                    ref_with_other_cns=ref_with_other_cns)
+    def load_controlnet(self, reference_type: str, style_fidelity: float, ref_weight: float):
+        ref_opts = ReferenceOptions.create_combo(reference_type=reference_type, style_fidelity=style_fidelity, ref_weight=ref_weight)
+        controlnet = ReferenceAdvanced(ref_opts=ref_opts, timestep_keyframes=None)
+        return (controlnet,)
+
+
+class ReferenceControlFinetune:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "reference_type": (ReferenceType._LIST, {"default": ReferenceType.ATTN_ADAIN}),
+                "attn_style_fidelity": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "attn_ref_weight": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "attn_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "adain_style_fidelity": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "adain_ref_weight": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "adain_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            },
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET", )
+    FUNCTION = "load_controlnet"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/Reference"
+
+    def load_controlnet(self, reference_type: str,
+                        attn_style_fidelity: float, attn_ref_weight: float, attn_strength: float,
+                        adain_style_fidelity: float, adain_ref_weight: float, adain_strength: float):
+        ref_opts = ReferenceOptions(reference_type=reference_type,
+                                    attn_style_fidelity=attn_style_fidelity, attn_ref_weight=attn_ref_weight, attn_strength=attn_strength,
+                                    adain_style_fidelity=adain_style_fidelity, adain_ref_weight=adain_ref_weight, adain_strength=adain_strength)
         controlnet = ReferenceAdvanced(ref_opts=ref_opts, timestep_keyframes=None)
         return (controlnet,)
 
