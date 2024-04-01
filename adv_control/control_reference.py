@@ -142,7 +142,8 @@ comfy.sample.sample = refcn_sample_factory(comfy.sample.sample)
 comfy.sample.sample_custom = refcn_sample_factory(comfy.sample.sample_custom, is_custom=True)
 
 
-REF_CONTROL_LIST = "ref_control_list"
+REF_ATTN_CONTROL_LIST = "ref_attn_control_list"
+REF_ADAIN_CONTROL_LIST = "ref_adain_control_list"
 REF_CONTROL_LIST_ALL = "ref_control_list_all"
 REF_CONTROL_INFO = "ref_control_info"
 REF_ATTN_MACHINE_STATE = "ref_attn_machine_state"
@@ -464,13 +465,15 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 indiv_conds.extend([cond_type] * per_batch)
             transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
             transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
-            # check if any ref_controlnets will use adain
-            use_adain = False
+            # check which controlnets do which thing
+            attn_controlnets = []
+            adain_controlnets = []
             for control in ref_controlnets:
+                if ReferenceType.is_attn(control.ref_opts.reference_type):
+                    attn_controlnets.append(control)
                 if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    use_adain = True
-                    break
-            if use_adain:
+                    adain_controlnets.append(control)
+            if len(adain_controlnets) > 0:
                 # ComfyUI uses forward_timestep_embed with the TimestepEmbedSequential passed into it
                 orig_forward_timestep_embed = openaimodel.forward_timestep_embed
                 openaimodel.forward_timestep_embed = forward_timestep_embed_ref_inject_factory(orig_forward_timestep_embed)
@@ -484,7 +487,8 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                     transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.WRITE
                 else:
                     transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.OFF
-                transformer_options[REF_CONTROL_LIST] = [control]
+                transformer_options[REF_ATTN_CONTROL_LIST] = [control]
+                transformer_options[REF_ADAIN_CONTROL_LIST] = [control]
                 # handle masks - apply x to unmasked
                 #strength_mask = torch.ones_like(x, dtype=x.dtype) * control.strength
                 #control.apply_advanced_strengths_and_masks(x=strength_mask, batched_number=batched_number)
@@ -498,12 +502,13 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             # run diffusion for real now
             transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_CONTROL_LIST] = ref_controlnets
+            transformer_options[REF_ATTN_CONTROL_LIST] = attn_controlnets
+            transformer_options[REF_ADAIN_CONTROL_LIST] = adain_controlnets
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
         finally:
             # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_module_mem()
-            if use_adain:
+            if len(adain_controlnets) > 0:
                 openaimodel.forward_timestep_embed = orig_forward_timestep_embed
 
     return forward_inject_UNetModel
@@ -548,7 +553,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
     c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
     # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
-    ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST, None)
+    ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_ATTN_CONTROL_LIST, None)
     ref_machine_state: str = transformer_options.get(REF_ATTN_MACHINE_STATE, None)
     # if in WRITE mode, save n and style_fidelity
     if ref_controlnets and ref_machine_state == MachineState.WRITE:
@@ -705,7 +710,7 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
         uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
         c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
         # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
-        ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST, None)
+        ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_ADAIN_CONTROL_LIST, None)
         ref_machine_state: str = transformer_options.get(REF_ADAIN_MACHINE_STATE, None)
         
         # if in WRITE mode, save var, mean, and style_cfg
@@ -721,9 +726,9 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
             if len(ts.injection_holder.bank_styles.var_bank) > 0:
                 # TODO: support strength/masks/latent_kfs
                 bank_styles = ts.injection_holder.bank_styles
-                style_fidelity = bank_styles.get_avg_style_fidelity()
                 var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
                 std = torch.maximum(var, torch.zeros_like(var) + eps) ** 0.5
+                style_fidelity = bank_styles.get_avg_style_fidelity()
                 var_acc = bank_styles.get_avg_var_bank()
                 mean_acc = bank_styles.get_avg_mean_bank()
                 std_acc = torch.maximum(var_acc, torch.zeros_like(var_acc) + eps) ** 0.5
