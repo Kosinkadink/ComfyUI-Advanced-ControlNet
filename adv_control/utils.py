@@ -316,27 +316,6 @@ def broadcast_image_to_full(tensor, target_batch_size, batched_number, except_on
         return torch.cat([tensor] * batched_number, dim=0)
 
 
-def ddpm_noise_latents(latents: Tensor, sigma: Tensor, noise: Tensor=None):
-    sigma = sigma.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-    alpha_cumprod = 1 / ((sigma * sigma) + 1)
-    sqrt_alpha_prod = alpha_cumprod ** 0.5
-    sqrt_one_minus_alpha_prod = (1. - alpha_cumprod) ** 0.5
-    if noise is None:
-        # generator = torch.Generator(device="cuda")
-        # generator.manual_seed(0)
-        # generator = torch.Generator()
-        # generator.manual_seed(0)
-        # noise = torch.randn(latents.size(), generator=generator).to(latents.device)
-        noise = torch.randn_like(latents).to(latents.device)
-    return sqrt_alpha_prod * latents + sqrt_one_minus_alpha_prod * noise
-
-
-def simple_noise_latents(latents: Tensor, sigma: float, noise: Tensor=None):
-    if noise is None:
-        noise = torch.rand_like(latents)
-    return latents + noise * sigma
-
-
 # from https://stackoverflow.com/a/24621200
 def deepcopy_with_sharing(obj, shared_attribute_names, memo=None):
     '''

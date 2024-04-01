@@ -10,10 +10,11 @@ import comfy.utils
 from comfy.controlnet import ControlBase
 from comfy.model_patcher import ModelPatcher
 from comfy.ldm.modules.attention import BasicTransformerBlock
+from comfy.ldm.modules.diffusionmodules import openaimodel
 
 from .logger import logger
 from .utils import (AdvancedControlBase, ControlWeights, TimestepKeyframeGroup, AbstractPreprocWrapper,
-                    deepcopy_with_sharing, prepare_mask_batch, broadcast_image_to_full, ddpm_noise_latents, simple_noise_latents)
+                    deepcopy_with_sharing, prepare_mask_batch, broadcast_image_to_full)
 
 
 def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
@@ -49,6 +50,7 @@ def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callab
             # inject
             # storage for all Reference-related injections
             reference_injections = ReferenceInjections()
+
             # first, handle attn module injection
             all_modules = torch_dfs(model.model)
             attn_modules: list[RefBasicTransformerBlock] = []
@@ -57,7 +59,6 @@ def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callab
                     attn_modules.append(module)
             attn_modules = [module for module in all_modules if isinstance(module, BasicTransformerBlock)]
             attn_modules = sorted(attn_modules, key=lambda x: -x.norm1.normalized_shape[0])
-            reference_injections.attn_modules = []
             for i, module in enumerate(attn_modules):
                 injection_holder = InjectionBasicTransformerBlockHolder(block=module, idx=i)
                 injection_holder.attn_weight = float(i) / float(len(attn_modules))
@@ -70,6 +71,37 @@ def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callab
                 mid_attn_modules: list[RefBasicTransformerBlock] = [module for module in mid_modules if isinstance(module, BasicTransformerBlock)]
                 for module in mid_attn_modules:
                     module.injection_holder.is_middle = True
+
+            # next, handle gn module injection (TimestepEmbedSequential)
+            # TODO: figure out the logic behind these hardcoded indexes
+            if type(model.model).__name__ == "SDXL":
+                input_block_indices = [4, 5, 7, 8]
+                output_block_indices = [0, 1, 2, 3, 4, 5]
+            else:
+                input_block_indices = [4, 5, 7, 8, 10, 11]
+                output_block_indices = [0, 1, 2, 3, 4, 5, 6, 7]
+            if hasattr(model.model.diffusion_model, "middle_block"):
+                module = model.model.diffusion_model.middle_block
+                injection_holder = InjectionTimestepEmbedSequentialHolder(block=module, idx=0, is_middle=True)
+                injection_holder.gn_weight = 0.0
+                module.injection_holder = injection_holder
+                reference_injections.gn_modules.append(module)
+            for w, i in enumerate(input_block_indices):
+                module = model.model.diffusion_model.input_blocks[i]
+                injection_holder = InjectionTimestepEmbedSequentialHolder(block=module, idx=i, is_input=True)
+                injection_holder.gn_weight = 1.0 - float(w) / float(len(input_block_indices))
+                module.injection_holder = injection_holder
+                reference_injections.gn_modules.append(module)
+            for w, i in enumerate(output_block_indices):
+                module = model.model.diffusion_model.output_blocks[i]
+                injection_holder = InjectionTimestepEmbedSequentialHolder(block=module, idx=i, is_output=True)
+                injection_holder.gn_weight = float(w) / float(len(output_block_indices))
+                module.injection_holder = injection_holder
+                reference_injections.gn_modules.append(module)
+            # hack gn_module forwards and update weights
+            for i, module in enumerate(reference_injections.gn_modules):
+                module.injection_holder.gn_weight *= 2
+
             # handle diffusion_model forward injection
             reference_injections.diffusion_model_orig_forward = model.model.diffusion_model.forward
             model.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(model.model.diffusion_model, type(model.model.diffusion_model))
@@ -84,13 +116,20 @@ def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callab
             return orig_comfy_sample(model, *args, **kwargs)
         finally:
             # cleanup injections
-            # first, restore attn modules
+            # restore attn modules
             attn_modules: list[RefBasicTransformerBlock] = reference_injections.attn_modules
             for module in attn_modules:
                 module.injection_holder.restore(module)
                 module.injection_holder.clean()
                 del module.injection_holder
             del attn_modules
+            # restore gn modules
+            gn_modules: list[RefTimestepEmbedSequential] = reference_injections.gn_modules
+            for module in gn_modules:
+                module.injection_holder.restore(module)
+                module.injection_holder.clean()
+                del module.injection_holder
+            del gn_modules
             # restore diffusion_model forward function
             model.model.diffusion_model.forward = reference_injections.diffusion_model_orig_forward.__get__(model.model.diffusion_model, type(model.model.diffusion_model))
             # restore model_options
@@ -106,7 +145,8 @@ comfy.sample.sample_custom = refcn_sample_factory(comfy.sample.sample_custom, is
 REF_CONTROL_LIST = "ref_control_list"
 REF_CONTROL_LIST_ALL = "ref_control_list_all"
 REF_CONTROL_INFO = "ref_control_info"
-REF_MACHINE_STATE = "ref_machine_state"
+REF_ATTN_MACHINE_STATE = "ref_attn_machine_state"
+REF_ADAIN_MACHINE_STATE = "ref_adain_machine_state"
 REF_COND_IDXS = "ref_cond_idxs"
 REF_UNCOND_IDXS = "ref_uncond_idxs"
 
@@ -115,7 +155,7 @@ class MachineState:
     WRITE = "write"
     READ = "read"
     STYLEALIGN = "stylealign"
-    TEST = "test"
+    OFF = "off"
 
 
 class ReferenceType:
@@ -124,8 +164,17 @@ class ReferenceType:
     ATTN_ADAIN = "reference_attn+adain"
     STYLE_ALIGN = "StyleAlign"
 
-    _LIST = [ATTN]
-    _LIST_FULL = [ATTN, ADAIN, ATTN_ADAIN]
+    _LIST = [ATTN, ADAIN, ATTN_ADAIN]
+    _LIST_ATTN = [ATTN, ATTN_ADAIN]
+    _LIST_ADAIN = [ADAIN, ATTN_ADAIN]
+
+    @classmethod
+    def is_attn(cls, ref_type: str):
+        return ref_type in cls._LIST_ATTN
+    
+    @classmethod
+    def is_adain(cls, ref_type: str):
+        return ref_type in cls._LIST_ADAIN
 
 
 class ReferenceOptions:
@@ -170,7 +219,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
             effective_strength = effective_strength * self.current_timestep_keyframe.strength
         return effective_strength
     
-    def get_effective_mask_or_float(self, x: Tensor, channels: int, is_mid: bool):
+    def get_effective_attn_mask_or_float(self, x: Tensor, channels: int, is_mid: bool):
         if not self.should_apply_effective_masks:
             return self.get_effective_strength()
         if is_mid:
@@ -182,6 +231,14 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         # mask is now shape [b, 1, h ,w]; need to turn into [b, h*w, 1]
         b, c, h, w = real_mask.shape
         real_mask = real_mask.permute(0, 2, 3, 1).reshape(b, h*w, c)
+        return real_mask
+
+    def get_effective_adain_mask_or_float(self, x: Tensor):
+        if not self.should_apply_effective_masks:
+            return self.get_effective_strength()
+        b, c, h, w = x.shape
+        real_mask = torch.ones([b, 1, h, w]).to(dtype=x.dtype, device=x.device) * self.strength
+        self.apply_advanced_strengths_and_masks(x=real_mask, batched_number=self.batched_number)
         return real_mask
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
@@ -225,7 +282,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
             self.cond_hint = broadcast_image_to_full(self.cond_hint, x_noisy.shape[0], batched_number, except_one=False)
         # noise cond_hint based on sigma (current step)
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
-        self.cond_hint = ddpm_noise_latents(self.cond_hint, sigma=t, noise=None)
+        self.cond_hint = ref_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
         self.should_apply_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0))
         # prepare mask - use direct_attn, so the mask dims will match source latents (and be smaller)
@@ -258,6 +315,28 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         return self
 
 
+def ref_noise_latents(latents: Tensor, sigma: Tensor, noise: Tensor=None):
+    sigma = sigma.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    alpha_cumprod = 1 / ((sigma * sigma) + 1)
+    sqrt_alpha_prod = alpha_cumprod ** 0.5
+    sqrt_one_minus_alpha_prod = (1. - alpha_cumprod) ** 0.5
+    if noise is None:
+        #generator = torch.Generator(device="cuda")
+        #generator.manual_seed(0)
+        #noise = torch.empty_like(latents).normal_(generator=generator)
+        # generator = torch.Generator()
+        # generator.manual_seed(0)
+        # noise = torch.randn(latents.size(), generator=generator).to(latents.device)
+        noise = torch.randn_like(latents).to(latents.device)
+    return sqrt_alpha_prod * latents + sqrt_one_minus_alpha_prod * noise
+
+
+def simple_noise_latents(latents: Tensor, sigma: float, noise: Tensor=None):
+    if noise is None:
+        noise = torch.rand_like(latents)
+    return latents + noise * sigma
+
+
 class BankStylesBasicTransformerBlock:
     def __init__(self):
         self.bank = []
@@ -270,6 +349,33 @@ class BankStylesBasicTransformerBlock:
     def clean(self):
         del self.bank
         self.bank = []
+        del self.style_cfgs
+        self.style_cfgs = []
+        del self.cn_idx
+        self.cn_idx = []
+
+
+class BankStylesTimestepEmbedSequential:
+    def __init__(self):
+        self.var_bank = []
+        self.mean_bank = []
+        self.style_cfgs = []
+        self.cn_idx: list[int] = []
+
+    def get_avg_var_bank(self):
+        return sum(self.var_bank) / float(len(self.var_bank))
+
+    def get_avg_mean_bank(self):
+        return sum(self.mean_bank) / float(len(self.mean_bank))
+    
+    def get_avg_style_fidelity(self):
+        return sum(self.style_cfgs) / float(len(self.style_cfgs))
+
+    def clean(self):
+        del self.mean_bank
+        self.mean_bank = []
+        del self.var_bank
+        self.var_bank = []
         del self.style_cfgs
         self.style_cfgs = []
         del self.cn_idx
@@ -291,9 +397,27 @@ class InjectionBasicTransformerBlockHolder:
         self.bank_styles.clean()
 
 
+class InjectionTimestepEmbedSequentialHolder:
+    def __init__(self, block: openaimodel.TimestepEmbedSequential, idx=None, is_middle=False, is_input=False, is_output=False):
+        self.original_forward = block.forward
+        self.idx = idx
+        self.gn_weight = 1.0
+        self.is_middle = is_middle
+        self.is_input = is_input
+        self.is_output = is_output
+        self.bank_styles = BankStylesTimestepEmbedSequential()
+    
+    def restore(self, block: openaimodel.TimestepEmbedSequential):
+        block.forward = self.original_forward
+    
+    def clean(self):
+        self.bank_styles.clean()
+
+
 class ReferenceInjections:
-    def __init__(self, attn_modules: list['RefBasicTransformerBlock']=None):
+    def __init__(self, attn_modules: list['RefBasicTransformerBlock']=None, gn_modules: list['RefTimestepEmbedSequential']=None):
         self.attn_modules = attn_modules if attn_modules else []
+        self.gn_modules = gn_modules if gn_modules else []
         self.diffusion_model_orig_forward: Callable = None
     
     def clean_module_mem(self):
@@ -302,11 +426,18 @@ class ReferenceInjections:
                 attn_module.injection_holder.clean()
             except Exception:
                 pass
+        for gn_module in self.gn_modules:
+            try:
+                gn_module.injection_holder.clean()
+            except Exception:
+                pass
 
     def cleanup(self):
         self.clean_module_mem()
         del self.attn_modules
         self.attn_modules = []
+        del self.gn_modules
+        self.gn_modules = []
         self.diffusion_model_orig_forward = None
 
 
@@ -333,9 +464,26 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 indiv_conds.extend([cond_type] * per_batch)
             transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
             transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
+            # check if any ref_controlnets will use adain
+            use_adain = False
+            for control in ref_controlnets:
+                if ReferenceType.is_adain(control.ref_opts.reference_type):
+                    use_adain = True
+                    break
+            if use_adain:
+                # ComfyUI uses forward_timestep_embed with the TimestepEmbedSequential passed into it
+                orig_forward_timestep_embed = openaimodel.forward_timestep_embed
+                openaimodel.forward_timestep_embed = forward_timestep_embed_ref_inject_factory(orig_forward_timestep_embed)
             # handle running diffusion with ref cond hints
             for control in ref_controlnets:
-                transformer_options[REF_MACHINE_STATE] = MachineState.WRITE
+                if ReferenceType.is_attn(control.ref_opts.reference_type):
+                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.WRITE
+                else:
+                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.OFF
+                if ReferenceType.is_adain(control.ref_opts.reference_type):
+                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.WRITE
+                else:
+                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.OFF
                 transformer_options[REF_CONTROL_LIST] = [control]
                 # handle masks - apply x to unmasked
                 #strength_mask = torch.ones_like(x, dtype=x.dtype) * control.strength
@@ -348,12 +496,15 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
                 kwargs = orig_kwargs
             # run diffusion for real now
-            transformer_options[REF_MACHINE_STATE] = MachineState.READ
+            transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.READ
+            transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.READ
             transformer_options[REF_CONTROL_LIST] = ref_controlnets
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
         finally:
             # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_module_mem()
+            if use_adain:
+                openaimodel.forward_timestep_embed = orig_forward_timestep_embed
 
     return forward_inject_UNetModel
 
@@ -398,7 +549,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
     # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
     ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST, None)
-    ref_machine_state: str = transformer_options.get(REF_MACHINE_STATE, None)
+    ref_machine_state: str = transformer_options.get(REF_ATTN_MACHINE_STATE, None)
     # if in WRITE mode, save n and style_fidelity
     if ref_controlnets and ref_machine_state == MachineState.WRITE:
         if ref_controlnets[0].ref_opts.ref_weight > self.injection_holder.attn_weight:
@@ -435,7 +586,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             real_bank = bank_styles.bank.copy()
             for idx, order in enumerate(bank_styles.cn_idx):
                 if ref_controlnets[idx].any_strength_to_apply():
-                    effective_strength = ref_controlnets[idx].get_effective_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
+                    effective_strength = ref_controlnets[idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
                 n,
@@ -466,7 +617,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             real_bank = bank_styles.bank.copy()
             for idx, order in enumerate(bank_styles.cn_idx):
                 if ref_controlnets[idx].any_strength_to_apply():
-                    effective_strength = ref_controlnets[idx].get_effective_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
+                    effective_strength = ref_controlnets[idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc: Tensor = self.attn1(
                 n,
@@ -537,6 +688,60 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
 
     return x
 
+
+class RefTimestepEmbedSequential(openaimodel.TimestepEmbedSequential):
+    injection_holder: InjectionTimestepEmbedSequentialHolder = None
+
+def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory: Callable):
+    def forward_timestep_embed_ref_inject(*args, **kwargs):
+        ts: RefTimestepEmbedSequential = args[0]
+        if not hasattr(ts, "injection_holder"):
+            return orig_timestep_embed_inject_factory(*args, **kwargs)
+        eps = 1e-6
+        x: Tensor = orig_timestep_embed_inject_factory(*args, **kwargs)
+        y: Tensor = None
+        transformer_options: dict[str] = args[4]
+        # Reference CN stuff
+        uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
+        c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
+        # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
+        ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST, None)
+        ref_machine_state: str = transformer_options.get(REF_ADAIN_MACHINE_STATE, None)
+        
+        # if in WRITE mode, save var, mean, and style_cfg
+        if ref_machine_state == MachineState.WRITE:
+            if ref_controlnets[0].ref_opts.ref_weight > ts.injection_holder.gn_weight:
+                var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
+                ts.injection_holder.bank_styles.var_bank.append(var)
+                ts.injection_holder.bank_styles.mean_bank.append(mean)
+                ts.injection_holder.bank_styles.style_cfgs.append(ref_controlnets[0].ref_opts.style_fidelity)
+                ts.injection_holder.bank_styles.cn_idx.append(ref_controlnets[0].order)
+        # if in READ mode, do math with saved var, mean, and style_cfg
+        if ref_machine_state == MachineState.READ:
+            if len(ts.injection_holder.bank_styles.var_bank) > 0:
+                # TODO: support strength/masks/latent_kfs
+                bank_styles = ts.injection_holder.bank_styles
+                style_fidelity = bank_styles.get_avg_style_fidelity()
+                var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
+                std = torch.maximum(var, torch.zeros_like(var) + eps) ** 0.5
+                var_acc = bank_styles.get_avg_var_bank()
+                mean_acc = bank_styles.get_avg_mean_bank()
+                std_acc = torch.maximum(var_acc, torch.zeros_like(var_acc) + eps) ** 0.5
+                y_uc = (((x - mean) / std) * std_acc) + mean_acc
+                if ref_controlnets[0].any_strength_to_apply():
+                    effective_strength = ref_controlnets[0].get_effective_adain_mask_or_float(x=x)
+                    y_uc = y_uc * effective_strength + x * (1-effective_strength)
+                y_c = y_uc.clone()
+                if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
+                    y_c[uc_idx_mask] = x.to(y_c.dtype)[uc_idx_mask]
+                y = style_fidelity * y_c + (1.0 - style_fidelity) * y_uc
+            ts.injection_holder.bank_styles.clean()
+
+        if y is None:
+            y = x
+        return y.to(x.dtype)
+
+    return forward_timestep_embed_ref_inject
 
 # DFS Search for Torch.nn.Module, Written by Lvmin
 def torch_dfs(model: torch.nn.Module):
