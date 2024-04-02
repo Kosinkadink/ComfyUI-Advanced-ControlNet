@@ -269,6 +269,20 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.apply_advanced_strengths_and_masks(x=real_mask, batched_number=self.batched_number)
         return real_mask
 
+    def should_run(self):
+        running = super().should_run()
+        if not running:
+            return running
+        attn_run = False
+        adain_run = False
+        if ReferenceType.is_attn(self.ref_opts.reference_type):
+            # attn will run as long as neither weight or strength is zero
+            attn_run = not (math.isclose(self.ref_opts.attn_ref_weight, 0.0) or math.isclose(self.ref_opts.attn_strength, 0.0))
+        if ReferenceType.is_adain(self.ref_opts.reference_type):
+            # adain will run as long as neither weight or strength is zero
+            adain_run = not (math.isclose(self.ref_opts.adain_ref_weight, 0.0) or math.isclose(self.ref_opts.adain_strength, 0.0))
+        return attn_run or adain_run
+
     def pre_run_advanced(self, model, percent_to_timestep_function):
         AdvancedControlBase.pre_run_advanced(self, model, percent_to_timestep_function)
         if type(self.cond_hint_original) == ReferencePreprocWrapper:
@@ -353,9 +367,9 @@ def ref_noise_latents(latents: Tensor, sigma: Tensor, noise: Tensor=None):
     sqrt_alpha_prod = alpha_cumprod ** 0.5
     sqrt_one_minus_alpha_prod = (1. - alpha_cumprod) ** 0.5
     if noise is None:
-        #generator = torch.Generator(device="cuda")
-        #generator.manual_seed(0)
-        #noise = torch.empty_like(latents).normal_(generator=generator)
+        # generator = torch.Generator(device="cuda")
+        # generator.manual_seed(0)
+        # noise = torch.empty_like(latents).normal_(generator=generator)
         # generator = torch.Generator()
         # generator.manual_seed(0)
         # noise = torch.randn(latents.size(), generator=generator).to(latents.device)
@@ -520,10 +534,7 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                     transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.OFF
                 transformer_options[REF_ATTN_CONTROL_LIST] = [control]
                 transformer_options[REF_ADAIN_CONTROL_LIST] = [control]
-                # handle masks - apply x to unmasked
-                #strength_mask = torch.ones_like(x, dtype=x.dtype) * control.strength
-                #control.apply_advanced_strengths_and_masks(x=strength_mask, batched_number=batched_number)
-                #real_cond_hint = control.cond_hint * strength_mask + x * (1 - strength_mask)
+
                 orig_kwargs = kwargs
                 if not control.ref_opts.ref_with_other_cns:
                     kwargs = kwargs.copy()
@@ -620,9 +631,16 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
+            cn_idx = 0
             for idx, order in enumerate(bank_styles.cn_idx):
-                if ref_controlnets[idx].any_attn_strength_to_apply():
-                    effective_strength = ref_controlnets[idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
+                # make sure matching ref cn is selected
+                for i in range(cn_idx, len(ref_controlnets)):
+                    if ref_controlnets[i].order == order:
+                        cn_idx = i
+                        break
+                assert order == ref_controlnets[cn_idx].order
+                if ref_controlnets[cn_idx].any_attn_strength_to_apply():
+                    effective_strength = ref_controlnets[cn_idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc = self.attn1.to_out(attn1_replace_patch[block_attn1](
                 n,
@@ -651,9 +669,16 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity()
             real_bank = bank_styles.bank.copy()
+            cn_idx = 0
             for idx, order in enumerate(bank_styles.cn_idx):
-                if ref_controlnets[idx].any_attn_strength_to_apply():
-                    effective_strength = ref_controlnets[idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
+                # make sure matching ref cn is selected
+                for i in range(cn_idx, len(ref_controlnets)):
+                    if ref_controlnets[i].order == order:
+                        cn_idx = i
+                        break
+                assert order == ref_controlnets[cn_idx].order
+                if ref_controlnets[cn_idx].any_attn_strength_to_apply():
+                    effective_strength = ref_controlnets[cn_idx].get_effective_attn_mask_or_float(x=n, channels=n.shape[2], is_mid=self.injection_holder.is_middle)
                     real_bank[idx] = real_bank[idx] * effective_strength + context_attn1 * (1-effective_strength)
             n_uc: Tensor = self.attn1(
                 n,
@@ -755,18 +780,30 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
         # if in READ mode, do math with saved var, mean, and style_cfg
         if ref_machine_state == MachineState.READ:
             if len(ts.injection_holder.bank_styles.var_bank) > 0:
-                # TODO: support strength/masks/latent_kfs
                 bank_styles = ts.injection_holder.bank_styles
                 var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
                 std = torch.maximum(var, torch.zeros_like(var) + eps) ** 0.5
-                style_fidelity = bank_styles.get_avg_style_fidelity()
-                var_acc = bank_styles.get_avg_var_bank()
-                mean_acc = bank_styles.get_avg_mean_bank()
-                std_acc = torch.maximum(var_acc, torch.zeros_like(var_acc) + eps) ** 0.5
-                y_uc = (((x - mean) / std) * std_acc) + mean_acc
-                if ref_controlnets[0].any_adain_strength_to_apply():
-                    effective_strength = ref_controlnets[0].get_effective_adain_mask_or_float(x=x)
-                    y_uc = y_uc * effective_strength + x * (1-effective_strength)
+                y_uc = torch.zeros_like(x)
+                cn_idx = 0
+                for idx, order in enumerate(bank_styles.cn_idx):
+                    # make sure matching ref cn is selected
+                    for i in range(cn_idx, len(ref_controlnets)):
+                        if ref_controlnets[i].order == order:
+                            cn_idx = i
+                            break
+                    assert order == ref_controlnets[cn_idx].order
+                    style_fidelity = bank_styles.style_cfgs[idx]
+                    var_acc = bank_styles.var_bank[idx]
+                    mean_acc = bank_styles.mean_bank[idx]
+                    std_acc = torch.maximum(var_acc, torch.zeros_like(var_acc) + eps) ** 0.5
+                    sub_y_uc = (((x - mean) / std) * std_acc) + mean_acc
+                    if ref_controlnets[cn_idx].any_adain_strength_to_apply():
+                        effective_strength = ref_controlnets[cn_idx].get_effective_adain_mask_or_float(x=x)
+                        sub_y_uc = sub_y_uc * effective_strength + x * (1-effective_strength)
+                    y_uc += sub_y_uc
+                # get average, if more than one
+                if len(bank_styles.cn_idx) > 1:
+                    y_uc /= len(bank_styles.cn_idx)
                 y_c = y_uc.clone()
                 if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
                     y_c[uc_idx_mask] = x.to(y_c.dtype)[uc_idx_mask]
