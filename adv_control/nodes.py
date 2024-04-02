@@ -11,7 +11,7 @@ from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, Sca
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor
-from .nodes_reference import ReferenceControlNetNode, ReferencePreprocessorNode
+from .nodes_reference import ReferenceControlNetNode, ReferenceControlFinetune, ReferencePreprocessorNode
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import LoadImagesFromDirectory
 from .logger import logger
@@ -237,6 +237,7 @@ NODE_CLASS_MAPPINGS = {
     # Reference
     "ACN_ReferencePreprocessor": ReferencePreprocessorNode,
     "ACN_ReferenceControlNet": ReferenceControlNetNode,
+    "ACN_ReferenceControlNetFinetune": ReferenceControlFinetune,
     # LOOSEControl
     #"ACN_ControlNetLoaderWithLoraAdvanced": ControlNetLoaderWithLoraAdvanced,
     # Deprecated
@@ -266,12 +267,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
     "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",
-    "ACN_SparseCtrlMergedLoaderAdvanced": "Load Merged SparseCtrl Model 🛂🅐🅒🅝",
+    "ACN_SparseCtrlMergedLoaderAdvanced": "🧪Load Merged SparseCtrl Model 🛂🅐🅒🅝",
     "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
     "ACN_SparseCtrlSpreadMethodNode": "SparseCtrl Spread Method 🛂🅐🅒🅝",
     # Reference
     "ACN_ReferencePreprocessor": "Reference Preproccessor 🛂🅐🅒🅝",
     "ACN_ReferenceControlNet": "Reference ControlNet 🛂🅐🅒🅝",
+    "ACN_ReferenceControlNetFinetune": "Reference ControlNet (Finetune) 🛂🅐🅒🅝",
     # LOOSEControl
     #"ACN_ControlNetLoaderWithLoraAdvanced": "Load Adv. ControlNet Model w/ LoRA 🛂🅐🅒🅝",
     # Deprecated
