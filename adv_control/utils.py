@@ -53,9 +53,12 @@ class ControlWeights:
             self.weights.reverse()
         self.weight_mask = weight_mask
 
-    def get(self, idx: int) -> Union[float, Tensor]:
+    def get(self, idx: int, default=1.0) -> Union[float, Tensor]:
         # if weights is not none, return index
         if self.weights is not None:
+            # this implies weights list is not aligning with expectations - will need to adjust code
+            if idx >= len(self.weights):
+                return default
             return self.weights[idx]
         return 1.0
 
@@ -542,6 +545,7 @@ class AdvancedControlBase:
             self.prepare_weight_mask_cond_hint(x, self.batched_number)
             # adjust mask for current layer and return
             return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, layers=layers))
+        
         return self.weights.get(idx=idx)
     
     def get_calc_pow(self, idx: int, layers: int) -> int:
