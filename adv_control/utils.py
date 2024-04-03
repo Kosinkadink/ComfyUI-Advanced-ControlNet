@@ -545,7 +545,6 @@ class AdvancedControlBase:
             self.prepare_weight_mask_cond_hint(x, self.batched_number)
             # adjust mask for current layer and return
             return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, layers=layers))
-        
         return self.weights.get(idx=idx)
     
     def get_calc_pow(self, idx: int, layers: int) -> int:
