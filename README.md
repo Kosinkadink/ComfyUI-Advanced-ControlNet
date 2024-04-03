@@ -15,7 +15,7 @@ ControlNet preprocessors are available through [comfyui_controlnet_aux](https://
 - SVD-ControlNet support
   - Stable Video Diffusion ControlNets trained by **CiaraRowles**: [Depth](https://huggingface.co/CiaraRowles/temporal-controlnet-depth-svd-v1/tree/main/controlnet), [Lineart](https://huggingface.co/CiaraRowles/temporal-controlnet-lineart-svd-v1/tree/main/controlnet)  
 - Reference support
-  - Currently, only ```reference_attn``` is exposed (equivalent of reference_only in Auto1111), reference_adain (and +attn) under construction. ```style_fidelity``` and ```ref_weight``` are equivalent to style_fidelity and control_weight in Auto1111, respectively, and strength of the Apply ControlNet is the balance between ref-influenced result and no-ref result.
+  - Supports ```reference_attn```, ```reference_adain```, and ```refrence_adain+attn``` modes. ```style_fidelity``` and ```ref_weight``` are equivalent to style_fidelity and control_weight in Auto1111, respectively, and strength of the Apply ControlNet is the balance between ref-influenced result and no-ref result. There is also a Reference ControlNet (Finetune) node that allows adjust the style_fidelity, weight, and strength of attn and adain separately.
 
 ## Table of Contents:
 - [Scheduling Explanation](#scheduling-explanation)
