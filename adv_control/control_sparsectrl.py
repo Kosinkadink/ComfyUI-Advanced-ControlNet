@@ -106,14 +106,16 @@ class SparseModelPatcher(ModelPatcher):
         else:
             patched_model = super().patch_model(device_to, patch_weights)
         try:
-            self.model.motion_wrapper.to(device=device_to)
+            if self.model.motion_wrapper is not None:
+                self.model.motion_wrapper.to(device=device_to)
         except Exception:
-            raise
+            pass
         return patched_model
 
     def unpatch_model(self, device_to=None, unpatch_weights=True):
         try:
-            self.model.motion_wrapper.to(device=device_to)
+            if self.model.motion_wrapper is not None:
+                self.model.motion_wrapper.to(device=device_to)
         except Exception:
             pass
         if unpatch_weights:
