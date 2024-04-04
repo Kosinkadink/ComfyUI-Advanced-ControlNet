@@ -23,6 +23,7 @@ from comfy.ldm.modules.attention import SpatialTransformer
 from comfy.ldm.modules.attention import attention_basic, attention_pytorch, attention_split, attention_sub_quad, default
 from comfy.ldm.modules.attention import FeedForward, SpatialTransformer
 from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential, ResBlock, Downsample
+from comfy.model_patcher import ModelPatcher
 from comfy.controlnet import broadcast_image_to
 from comfy.utils import repeat_to_batch_size
 import comfy.ops
@@ -57,11 +58,11 @@ class SparseControlNet(ControlNetCLDM):
             self.input_hint_block = TimestepEmbedSequential(
                 zero_module(operations.conv_nd(self.dims, hint_channels, self.model_channels, 3, padding=1, dtype=self.dtype, device=device)),
             )
-        self.motion_holder: MotionWrapperHolder = None
+        self.motion_wrapper: SparseCtrlMotionWrapper = None
     
     def set_actual_length(self, actual_length: int, full_length: int):
-        if self.motion_holder is not None:
-            self.motion_holder.motion_wrapper.set_video_length(video_length=actual_length, full_length=full_length)
+        if self.motion_wrapper is not None:
+            self.motion_wrapper.set_video_length(video_length=actual_length, full_length=full_length)
 
     def forward(self, x: Tensor, hint: Tensor, timesteps, context, y=None, **kwargs):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
@@ -92,6 +93,50 @@ class SparseControlNet(ControlNetCLDM):
         outs.append(self.middle_block_out(h, emb, context))
 
         return outs
+
+
+class SparseModelPatcher(ModelPatcher):
+    def __init__(self, *args, **kwargs):
+        self.model: SparseControlNet
+        super().__init__(*args, **kwargs)
+    
+    def patch_model(self, device_to=None, patch_weights=True):
+        if patch_weights:
+            patched_model = super().patch_model(device_to)
+        else:
+            patched_model = super().patch_model(device_to, patch_weights)
+        try:
+            self.model.motion_wrapper.to(device=device_to)
+        except Exception:
+            raise
+        return patched_model
+
+    def unpatch_model(self, device_to=None, unpatch_weights=True):
+        try:
+            self.model.motion_wrapper.to(device=device_to)
+        except Exception:
+            pass
+        if unpatch_weights:
+            return super().unpatch_model(device_to)
+        else:
+            return super().unpatch_model(device_to, unpatch_weights)
+
+    def clone(self):
+        # normal ModelPatcher clone actions
+        n = SparseModelPatcher(self.model, self.load_device, self.offload_device, self.size, self.current_device, weight_inplace_update=self.weight_inplace_update)
+        n.patches = {}
+        for k in self.patches:
+            n.patches[k] = self.patches[k][:]
+        if hasattr(n, "patches_uuid"):
+            self.patches_uuid = n.patches_uuid
+
+        n.object_patches = self.object_patches.copy()
+        n.model_options = copy.deepcopy(self.model_options)
+        n.model_keys = self.model_keys
+        if hasattr(n, "backup"):
+            self.backup = n.backup
+        if hasattr(n, "object_patches_backup"):
+            self.object_patches_backup = n.object_patches_backup
 
 
 class PreprocSparseRGBWrapper:
@@ -270,11 +315,6 @@ def get_position_encoding_max_len(mm_state_dict: dict[str, Tensor], mm_name: str
     raise ValueError(f"No pos_encoder.pe found in SparseCtrl state_dict - {mm_name} is not a valid SparseCtrl model!")
 
 
-class MotionWrapperHolder:
-    def __init__(self, motion_wrapper: 'SparseCtrlMotionWrapper'):
-        self.motion_wrapper = motion_wrapper
-
-
 class SparseCtrlMotionWrapper(nn.Module):
     def __init__(self, mm_state_dict: dict[str, Tensor]):
         super().__init__()
@@ -293,14 +333,14 @@ class SparseCtrlMotionWrapper(nn.Module):
                 self.up_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.UP))
         if has_mid_block(mm_state_dict):
             self.mid_block = MotionModule(1280, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.MID)
-    
+
     def inject(self, unet: SparseControlNet):
         # inject input (down) blocks
         self._inject(unet.input_blocks, self.down_blocks)
         # inject mid block, if present
         if self.mid_block is not None:
             self._inject([unet.middle_block], [self.mid_block])
-        unet.motion_holder = MotionWrapperHolder(self)
+        unet.motion_wrapper = self
 
     def _inject(self, unet_blocks: nn.ModuleList, mm_blocks: nn.ModuleList):
         # Rules for injection:
@@ -342,8 +382,8 @@ class SparseCtrlMotionWrapper(nn.Module):
         self._eject(unet.input_blocks)
         # remove from middle block (encapsulate in list to make compatible)
         self._eject([unet.middle_block])
-        del unet.motion_holder
-        unet.motion_holder = None
+        del unet.motion_wrapper
+        unet.motion_wrapper = None
 
     def _eject(self, unet_blocks: nn.ModuleList):
         # eject all VanillaTemporalModule objects from all blocks
