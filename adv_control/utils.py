@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import Callable, Union
 import torch
 from torch import Tensor
-import torch.nn.functional as F
+import torch.nn.functional
 import math
 
 import comfy.ops
@@ -271,14 +271,19 @@ class AbstractPreprocWrapper:
 # depending on model, AnimateDiff may inject into GroupNorm, so make sure GroupNorm will be clean
 class disable_weight_init_clean_groupnorm(comfy.ops.disable_weight_init):
     class GroupNorm(comfy.ops.disable_weight_init.GroupNorm):
-        def forward(self, input: Tensor) -> Tensor:
-            return F.group_norm(
-                input, self.num_groups, self.weight, self.bias, self.eps)
+        def forward_comfy_cast_weights(self, input):
+            weight, bias = comfy.ops.cast_bias_weight(self, input)
+            return torch.nn.functional.group_norm(input, self.num_groups, weight, bias, self.eps)
+
+        def forward(self, input):
+            if self.comfy_cast_weights:
+                return self.forward_comfy_cast_weights(input)
+            else:
+                return torch.nn.functional.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
+
 class manual_cast_clean_groupnorm(comfy.ops.manual_cast):
-    class GroupNorm(comfy.ops.manual_cast.GroupNorm):
-        def forward(self, input: Tensor) -> Tensor:
-            return F.group_norm(
-                input, self.num_groups, self.weight, self.bias, self.eps)
+    class GroupNorm(disable_weight_init_clean_groupnorm.GroupNorm):
+        comfy_cast_weights = True
 
 
 # adapted from comfy/sample.py

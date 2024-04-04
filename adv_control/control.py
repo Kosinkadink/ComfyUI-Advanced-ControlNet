@@ -10,7 +10,7 @@ import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
 from comfy.model_patcher import ModelPatcher
 
-from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
+from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
 from .control_lllite import LLLiteModule, LLLitePatch
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
@@ -238,6 +238,7 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
 class SparseCtrlAdvanced(ControlNetAdvanced):
     def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
         super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+        self.control_model_wrapped = SparseModelPatcher(self.control_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
         self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
@@ -331,10 +332,10 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                 raise ValueError("Any model besides RGB SparseCtrl should NOT have its images go through the RGB SparseCtrl preprocessor.")
             self.cond_hint_original = self.cond_hint_original.condhint
         self.latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
-        if self.control_model.motion_holder is not None:
-            self.control_model.motion_holder.motion_wrapper.reset()
-            self.control_model.motion_holder.motion_wrapper.set_strength(self.sparse_settings.motion_strength)
-            self.control_model.motion_holder.motion_wrapper.set_scale_multiplier(self.sparse_settings.motion_scale)
+        if self.control_model.motion_wrapper is not None:
+            self.control_model.motion_wrapper.reset()
+            self.control_model.motion_wrapper.set_strength(self.sparse_settings.motion_strength)
+            self.control_model.motion_wrapper.set_scale_multiplier(self.sparse_settings.motion_scale)
 
     def cleanup_advanced(self):
         super().cleanup_advanced()
