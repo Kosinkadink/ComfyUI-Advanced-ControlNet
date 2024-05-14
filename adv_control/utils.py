@@ -3,6 +3,7 @@ from typing import Callable, Union
 import torch
 from torch import Tensor
 import torch.nn.functional
+import numpy as np
 import math
 
 import comfy.ops
@@ -107,6 +108,29 @@ class StrengthInterpolation:
     EASE_IN_OUT = "ease-in-out"
     NONE = "none"
 
+    _LIST = [LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT]
+    _LIST_WITH_NONE = [LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT, NONE]
+
+    @classmethod
+    def get_weights(cls, num_from: float, num_to: float, length: int, method: str, reverse=False):
+        diff = num_to - num_from
+        if method == cls.LINEAR:
+            weights = torch.linspace(num_from, num_to, length)
+        elif method == cls.EASE_IN:
+            index = torch.linspace(0, 1, length)
+            weights = diff * np.power(index, 2) + num_from
+        elif method == cls.EASE_OUT:
+            index = torch.linspace(0, 1, length)
+            weights = diff * (1 - np.power(1 - index, 2)) + num_from
+        elif method == cls.EASE_IN_OUT:
+            index = torch.linspace(0, 1, length)
+            weights = diff * ((1 - np.cos(index * np.pi)) / 2) + num_from
+        else:
+            raise ValueError(f"Unrecognized interpolation method '{method}'.")
+        if reverse:
+            weights = weights.flip(dims=(0,))
+        return weights
+
 
 class LatentKeyframe:
     def __init__(self, batch_index: int, strength: float) -> None:
@@ -154,22 +178,20 @@ class TimestepKeyframe:
     def __init__(self,
                  start_percent: float = 0.0,
                  strength: float = 1.0,
-                 interpolation: str = StrengthInterpolation.NONE,
                  control_weights: ControlWeights = None,
                  latent_keyframes: LatentKeyframeGroup = None,
                  null_latent_kf_strength: float = 0.0,
                  inherit_missing: bool = True,
-                 guarantee_usage: bool = True,
+                 guarantee_steps: int = 1,
                  mask_hint_orig: Tensor = None) -> None:
         self.start_percent = start_percent
         self.start_t = 999999999.9
         self.strength = strength
-        self.interpolation = interpolation
         self.control_weights = control_weights
         self.latent_keyframes = latent_keyframes
         self.null_latent_kf_strength = null_latent_kf_strength
         self.inherit_missing = inherit_missing
-        self.guarantee_usage = guarantee_usage
+        self.guarantee_steps = guarantee_steps
         self.mask_hint_orig = mask_hint_orig
 
     def has_control_weights(self):
@@ -182,9 +204,9 @@ class TimestepKeyframe:
         return self.mask_hint_orig is not None
     
     
-    @classmethod
-    def default(cls) -> 'TimestepKeyframe':
-        return cls(0.0)
+    @staticmethod
+    def default() -> 'TimestepKeyframe':
+        return TimestepKeyframe(start_percent=0.0, guarantee_steps=0)
 
 
 # always maintain sorted state (by start_percent of TimestepKeyFrame)
@@ -194,16 +216,9 @@ class TimestepKeyframeGroup:
         self.keyframes.append(TimestepKeyframe.default())
 
     def add(self, keyframe: TimestepKeyframe) -> None:
-        added = False
-        # replace existing keyframe if same start_percent
-        for i in range(len(self.keyframes)):
-            if self.keyframes[i].start_percent == keyframe.start_percent:
-                self.keyframes[i] = keyframe
-                added = True
-                break
-        if not added:
-            self.keyframes.append(keyframe)
-        self.keyframes.sort(key=lambda k: k.start_percent)
+        # add to end of list, then sort
+        self.keyframes.append(keyframe)
+        self.keyframes = get_sorted_list_via_attr(self.keyframes, attr="start_percent")
 
     def get_index(self, index: int) -> Union[TimestepKeyframe, None]:
         try:
@@ -225,8 +240,9 @@ class TimestepKeyframeGroup:
     
     def clone(self) -> 'TimestepKeyframeGroup':
         cloned = TimestepKeyframeGroup()
+        # already sorted, so don't use add function to make cloning quicker
         for tk in self.keyframes:
-            cloned.add(tk)
+            cloned.keyframes.append(tk)
         return cloned
     
     @classmethod
@@ -362,6 +378,30 @@ def deepcopy_with_sharing(obj, shared_attribute_names, memo=None):
     return clone
 
 
+def get_sorted_list_via_attr(objects: list, attr: str) -> list:
+    if not objects:
+        return objects
+    elif len(objects) <= 1:
+        return [x for x in objects]
+    # now that we know we have to sort, do it following these rules:
+    # a) if objects have same value of attribute, maintain their relative order
+    # b) perform sorting of the groups of objects with same attributes
+    unique_attrs = {}
+    for o in objects:
+        val_attr = getattr(o, attr)
+        attr_list: list = unique_attrs.get(val_attr, list())
+        attr_list.append(o)
+        if val_attr not in unique_attrs:
+            unique_attrs[val_attr] = attr_list
+    # now that we have the unique attr values grouped together in relative order, sort them by key
+    sorted_attrs = dict(sorted(unique_attrs.items()))
+    # now flatten out the dict into a list to return
+    sorted_list = []
+    for object_list in sorted_attrs.values():
+        sorted_list.extend(object_list)
+    return sorted_list
+
+
 class WeightTypeException(TypeError):
     "Raised when weight not compatible with AdvancedControlBase object"
     pass
@@ -396,7 +436,7 @@ class AdvancedControlBase:
         self.set_timestep_keyframes(timestep_keyframes)
         # override some functions
         self.get_control = self.get_control_inject
-        self.control_merge = self.control_merge_inject#.__get__(self, type(self))
+        self.control_merge = self.control_merge_inject
         self.pre_run = self.pre_run_inject
         self.cleanup = self.cleanup_inject
         self.set_previous_controlnet = self.set_previous_controlnet_inject
@@ -429,9 +469,9 @@ class AdvancedControlBase:
     def set_timestep_keyframes(self, timestep_keyframes: TimestepKeyframeGroup):
         self.timestep_keyframes = timestep_keyframes if timestep_keyframes else TimestepKeyframeGroup()
         # prepare first timestep_keyframe related stuff
-        self.current_timestep_keyframe = None
-        self.current_timestep_index = -1
-        self.next_timestep_keyframe = None
+        self._current_timestep_keyframe = None
+        self._current_timestep_index = -1
+        self._current_used_steps = 0
         self.weights = None
         self.latent_keyframes = None
 
@@ -440,39 +480,44 @@ class AdvancedControlBase:
         self.batched_number = batched_number
         # get current step percent
         curr_t: float = self.t
-        prev_index = self.current_timestep_index
-        # if has next index, loop through and see if need to switch
-        if self.timestep_keyframes.has_index(self.current_timestep_index+1):
-            for i in range(self.current_timestep_index+1, len(self.timestep_keyframes)):
-                eval_tk = self.timestep_keyframes[i]
-                # check if start percent is less or equal to curr_t
-                if eval_tk.start_t >= curr_t:
-                    self.current_timestep_index = i
-                    self.current_timestep_keyframe = eval_tk
-                    # keep track of control weights, latent keyframes, and masks,
-                    # accounting for inherit_missing
-                    if self.current_timestep_keyframe.has_control_weights():
-                        self.weights = self.current_timestep_keyframe.control_weights
-                    elif not self.current_timestep_keyframe.inherit_missing:
-                        self.weights = self.weights_default
-                    if self.current_timestep_keyframe.has_latent_keyframes():
-                        self.latent_keyframes = self.current_timestep_keyframe.latent_keyframes
-                    elif not self.current_timestep_keyframe.inherit_missing:
-                        self.latent_keyframes = None
-                    if self.current_timestep_keyframe.has_mask_hint():
-                        self.tk_mask_cond_hint_original = self.current_timestep_keyframe.mask_hint_orig
-                    elif not self.current_timestep_keyframe.inherit_missing:
-                        del self.tk_mask_cond_hint_original
-                        self.tk_mask_cond_hint_original = None
-                    # if guarantee_usage, stop searching for other TKs
-                    if self.current_timestep_keyframe.guarantee_usage:
+        prev_index = self._current_timestep_index
+        # if met guaranteed steps (or no current keyframe), look for next keyframe in case need to switch
+        if self._current_timestep_keyframe is None or self._current_used_steps >= self._current_timestep_keyframe.guarantee_steps:
+            # if has next index, loop through and see if need to switch
+            if self.timestep_keyframes.has_index(self._current_timestep_index+1):
+                for i in range(self._current_timestep_index+1, len(self.timestep_keyframes)):
+                    eval_tk = self.timestep_keyframes[i]
+                    # check if start percent is less or equal to curr_t
+                    if eval_tk.start_t >= curr_t:
+                        self._current_timestep_index = i
+                        self._current_timestep_keyframe = eval_tk
+                        self._current_used_steps = 0
+                        # keep track of control weights, latent keyframes, and masks,
+                        # accounting for inherit_missing
+                        if self._current_timestep_keyframe.has_control_weights():
+                            self.weights = self._current_timestep_keyframe.control_weights
+                        elif not self._current_timestep_keyframe.inherit_missing:
+                            self.weights = self.weights_default
+                        if self._current_timestep_keyframe.has_latent_keyframes():
+                            self.latent_keyframes = self._current_timestep_keyframe.latent_keyframes
+                        elif not self._current_timestep_keyframe.inherit_missing:
+                            self.latent_keyframes = None
+                        if self._current_timestep_keyframe.has_mask_hint():
+                            self.tk_mask_cond_hint_original = self._current_timestep_keyframe.mask_hint_orig
+                        elif not self._current_timestep_keyframe.inherit_missing:
+                            del self.tk_mask_cond_hint_original
+                            self.tk_mask_cond_hint_original = None
+                        # if guarantee_steps greater than zero, stop searching for other keyframes
+                        if self._current_timestep_keyframe.guarantee_steps > 0:
+                            break
+                    # if eval_tk is outside of percent range, stop looking further
+                    else:
                         break
-                # if eval_tk is outside of percent range, stop looking further
-                else:
-                    break
         
+        # update steps current keyframe is used
+        self._current_used_steps += 1
         # if index changed, apply overrides
-        if prev_index != self.current_timestep_index:
+        if prev_index != self._current_timestep_index:
             if self.weights_override is not None:
                 self.weights = self.weights_override
             if self.latent_keyframe_override is not None:
@@ -519,7 +564,7 @@ class AdvancedControlBase:
         self.disarmed = True
 
     def should_run(self):
-        if math.isclose(self.strength, 0.0) or math.isclose(self.current_timestep_keyframe.strength, 0.0):
+        if math.isclose(self.strength, 0.0) or math.isclose(self._current_timestep_keyframe.strength, 0.0):
             return False
         if self.timestep_range is not None:
             if self.t > self.timestep_range[0] or self.t < self.timestep_range[1]:
@@ -530,7 +575,7 @@ class AdvancedControlBase:
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
-        if self.strength == 0.0 or self.current_timestep_keyframe.strength == 0.0:
+        if self.strength == 0.0 or self._current_timestep_keyframe.strength == 0.0:
             return self.default_control_actions(x_noisy, t, cond, batched_number)
         # otherwise, perform normal function
         return self.get_control_advanced(x_noisy, t, cond, batched_number)
@@ -596,7 +641,7 @@ class AdvancedControlBase:
             for batch_index in indeces_to_null:
                 # apply null for each batched cond/uncond
                 for b in range(batched_number):
-                    final_mults[(latent_count*b)+batch_index] = self.current_timestep_keyframe.null_latent_kf_strength
+                    final_mults[(latent_count*b)+batch_index] = self._current_timestep_keyframe.null_latent_kf_strength
         # convert final_mults into tensor and match expected dimension count
         final_tensor = torch.tensor(final_mults, dtype=x.dtype, device=x.device)
         while len(final_tensor.shape) < len(x.shape):
@@ -614,8 +659,8 @@ class AdvancedControlBase:
             masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
-        if self.current_timestep_keyframe.strength != 1.0:
-            x[:] *= self.current_timestep_keyframe.strength
+        if self._current_timestep_keyframe.strength != 1.0:
+            x[:] *= self._current_timestep_keyframe.strength
     
     def control_merge_inject(self: 'AdvancedControlBase', control_input, control_output, control_prev, output_dtype):
         out = {'input':[], 'middle':[], 'output': []}
@@ -674,7 +719,7 @@ class AdvancedControlBase:
         self.prepare_tk_mask_cond_hint(x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
 
     def prepare_tk_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
-        return self._prepare_mask("tk_mask_cond_hint", self.current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
+        return self._prepare_mask("tk_mask_cond_hint", self._current_timestep_keyframe.mask_hint_orig, x_noisy, t, cond, batched_number, dtype, direct_attn=direct_attn)
 
     def prepare_weight_mask_cond_hint(self, x_noisy: Tensor, batched_number, dtype=None):
         return self._prepare_mask("weight_mask_cond_hint", self.weights.weight_mask, x_noisy, t=None, cond=None, batched_number=batched_number, dtype=dtype, direct_attn=True)
@@ -721,9 +766,9 @@ class AdvancedControlBase:
         self.weights = None
         self.latent_keyframes = None
         # timestep stuff
-        self.current_timestep_keyframe = None
-        self.next_timestep_keyframe = None
-        self.current_timestep_index = -1
+        self._current_timestep_keyframe = None
+        self._current_timestep_index = -1
+        self._current_used_steps = 0
         # clear mask hints
         if self.mask_cond_hint is not None:
             del self.mask_cond_hint

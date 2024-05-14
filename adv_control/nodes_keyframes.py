@@ -2,9 +2,187 @@ from typing import Union
 import numpy as np
 from collections.abc import Iterable
 
-from .utils import LatentKeyframe, LatentKeyframeGroup, BIGMIN, BIGMAX
+from .utils import ControlWeights, TimestepKeyframe, TimestepKeyframeGroup, LatentKeyframe, LatentKeyframeGroup, BIGMIN, BIGMAX
 from .utils import StrengthInterpolation as SI
 from .logger import logger
+
+
+class TimestepKeyframeNode:
+    OUTDATED_DUMMY = -39
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
+            },
+            "optional": {
+                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
+                "latent_keyframe": ("LATENT_KEYFRAME", ),
+                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "inherit_missing": ("BOOLEAN", {"default": True}, ),
+                "guarantee_steps": ("INT", {"default": 1, "min": 0, "max": BIGMAX}),
+                "mask_optional": ("MASK", ),
+            }
+        }
+    
+    RETURN_NAMES = ("TIMESTEP_KF", )
+    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
+    FUNCTION = "load_keyframe"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
+
+    def load_keyframe(self,
+                      start_percent: float,
+                      strength: float=1.0,
+                      cn_weights: ControlWeights=None, control_net_weights: ControlWeights=None, # old name
+                      latent_keyframe: LatentKeyframeGroup=None,
+                      prev_timestep_kf: TimestepKeyframeGroup=None, prev_timestep_keyframe: TimestepKeyframeGroup=None, # old name
+                      null_latent_kf_strength: float=0.0,
+                      inherit_missing=True,
+                      guarantee_steps=OUTDATED_DUMMY,
+                      guarantee_usage=True, # old input
+                      mask_optional=None,):
+        # if using outdated dummy value, means node on workflow is outdated and should appropriately convert behavior
+        if guarantee_steps == self.OUTDATED_DUMMY:
+            guarantee_steps = int(guarantee_usage)
+        control_net_weights = control_net_weights if control_net_weights else cn_weights
+        prev_timestep_keyframe = prev_timestep_keyframe if prev_timestep_keyframe else prev_timestep_kf
+        if not prev_timestep_keyframe:
+            prev_timestep_keyframe = TimestepKeyframeGroup()
+        else:
+            prev_timestep_keyframe = prev_timestep_keyframe.clone()
+        keyframe = TimestepKeyframe(start_percent=start_percent, strength=strength, null_latent_kf_strength=null_latent_kf_strength,
+                                    control_weights=control_net_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing,
+                                    guarantee_steps=guarantee_steps, mask_hint_orig=mask_optional)
+        prev_timestep_keyframe.add(keyframe)
+        return (prev_timestep_keyframe,)
+    
+
+class TimestepKeyframeInterpolationNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001},),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "strength_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001},),
+                "strength_end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001},),
+                "interpolation": (SI._LIST, ),
+                "intervals": ("INT", {"default": 50, "min": 2, "max": 100, "step": 1}),
+            },
+            "optional": {
+                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
+                "latent_keyframe": ("LATENT_KEYFRAME", ),
+                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001},),
+                "inherit_missing": ("BOOLEAN", {"default": True},),
+                "mask_optional": ("MASK", ),
+                "print_keyframes": ("BOOLEAN", {"default": False}),
+            }
+        }
+    
+    RETURN_NAMES = ("TIMESTEP_KF", )
+    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
+    FUNCTION = "load_keyframes"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
+
+    def load_keyframe(self,
+                      start_percent: float, end_percent: float,
+                      strength_start: float, strength_end: float, interpolation: str, intervals: int,
+                      cn_weights: ControlWeights=None,
+                      latent_keyframe: LatentKeyframeGroup=None,
+                      prev_timestep_kf: TimestepKeyframeGroup=None,
+                      null_latent_kf_strength: float=0.0,
+                      inherit_missing=True,
+                      guarantee_steps=1,
+                      mask_optional=None, print_keyframes=False):
+        if not prev_timestep_kf:
+            prev_timestep_kf = TimestepKeyframeGroup()
+        else:
+            prev_timestep_kf = prev_timestep_kf.clone()
+
+        percents = SI.get_weights(num_from=start_percent, num_to=end_percent, length=intervals, method=SI.LINEAR)
+        strengths = SI.get_weights(num_from=strength_start, num_to=strength_end, length=intervals, method=interpolation)
+
+        is_first = True
+        for percent, strength in zip(percents, strengths):
+            guarantee_steps = 0
+            if is_first:
+                guarantee_steps = 1
+                is_first = False
+            prev_timestep_kf.add(TimestepKeyframe(start_percent=percent, strength=strength, null_latent_kf_strength=null_latent_kf_strength,
+                                    control_weights=cn_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing,
+                                    guarantee_steps=guarantee_steps, mask_hint_orig=mask_optional))
+            if print_keyframes:
+                logger.info(f"TimestepKeyframe - start_percent:{percent} = {strength}")
+        return (prev_timestep_kf,)
+
+
+class TimestepKeyframeFromStrengthListNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "float_strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.001, "forceInput": True}),
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001},),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+            },
+            "optional": {
+                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
+                "latent_keyframe": ("LATENT_KEYFRAME", ),
+                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001},),
+                "inherit_missing": ("BOOLEAN", {"default": True},),
+                "mask_optional": ("MASK", ),
+                "print_keyframes": ("BOOLEAN", {"default": False}),
+            }
+        }
+    
+    RETURN_NAMES = ("TIMESTEP_KF", )
+    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
+    FUNCTION = "load_keyframes"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
+
+    def load_keyframe(self,
+                      start_percent: float, end_percent: float,
+                      float_strengths: float,
+                      cn_weights: ControlWeights=None,
+                      latent_keyframe: LatentKeyframeGroup=None,
+                      prev_timestep_kf: TimestepKeyframeGroup=None,
+                      null_latent_kf_strength: float=0.0,
+                      inherit_missing=True,
+                      guarantee_steps=1,
+                      mask_optional=None, print_keyframes=False):
+        if not prev_timestep_kf:
+            prev_timestep_kf = TimestepKeyframeGroup()
+        else:
+            prev_timestep_kf = prev_timestep_kf.clone()
+
+        if type(float_strengths) in (float, int):
+            float_strengths = [float(float_strengths)]
+        elif isinstance(float_strengths, Iterable):
+            pass
+        else:
+            raise Exception(f"strengths_float must be either an iterable input or a float, but was {type(float_strengths).__repr__}.")
+        percents = SI.get_weights(num_from=start_percent, num_to=end_percent, length=len(float_strengths), method=SI.LINEAR)
+
+        is_first = True
+        for percent, strength in zip(percents, float_strengths):
+            guarantee_steps = 0
+            if is_first:
+                guarantee_steps = 1
+                is_first = False
+            prev_timestep_kf.add(TimestepKeyframe(start_percent=percent, strength=strength, null_latent_kf_strength=null_latent_kf_strength,
+                                    control_weights=cn_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing,
+                                    guarantee_steps=guarantee_steps, mask_hint_orig=mask_optional))
+            if print_keyframes:
+                logger.info(f"TimestepKeyframe - start_percent:{percent} = {strength}")
+        return (prev_timestep_kf,)
 
 
 class LatentKeyframeNode:
@@ -149,7 +327,7 @@ class LatentKeyframeGroupNode:
         
         if print_keyframes:
             for keyframe in curr_latent_keyframe.keyframes:
-                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
+                logger.info(f"LatentKeyframe {keyframe.batch_index}={keyframe.strength}")
 
         # replace values with prev_latent_keyframes
         for latent_keyframe in prev_latent_keyframe.keyframes:
@@ -167,7 +345,7 @@ class LatentKeyframeInterpolationNode:
                 "batch_index_to_excl": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
                 "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT], ),
+                "interpolation": (SI._LIST, ),
             },
             "optional": {
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
@@ -223,7 +401,7 @@ class LatentKeyframeInterpolationNode:
         
         if print_keyframes:
             for keyframe in curr_latent_keyframe.keyframes:
-                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
+                logger.info(f"LatentKeyframe {keyframe.batch_index}={keyframe.strength}")
 
         # replace values with prev_latent_keyframes
         for latent_keyframe in prev_latent_keyframe.keyframes:
@@ -274,7 +452,7 @@ class LatentKeyframeBatchedGroupNode:
 
         if print_keyframes:
             for keyframe in curr_latent_keyframe.keyframes:
-                logger.info(f"keyframe {keyframe.batch_index}:{keyframe.strength}")
+                logger.info(f"LatentKeyframe {keyframe.batch_index}={keyframe.strength}")
 
         # replace values with prev_latent_keyframes
         for latent_keyframe in prev_latent_keyframe.keyframes:

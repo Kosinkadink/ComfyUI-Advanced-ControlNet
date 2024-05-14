@@ -244,4 +244,4 @@ class LLLiteModule(torch.nn.Module):
         cx = self.up(cx)
         if control.latent_keyframes is not None:
             cx = cx * control.calc_latent_keyframe_mults(x=cx, batched_number=control.batched_number)
-        return cx * mask * control.strength * control.current_timestep_keyframe.strength
+        return cx * mask * control.strength * control._current_timestep_keyframe.strength
