@@ -5,66 +5,16 @@ import folder_paths
 from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet
-from .utils import ControlWeights, ControlWeightType, LatentKeyframeGroup, TimestepKeyframe, TimestepKeyframeGroup
-from .utils import StrengthInterpolation as SI
+from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, BIGMAX
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
-from .nodes_latent_keyframe import LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode
+from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
+                              TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor
 from .nodes_reference import ReferenceControlNetNode, ReferenceControlFinetune, ReferencePreprocessorNode
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import LoadImagesFromDirectory
 from .logger import logger
-
-
-class TimestepKeyframeNode:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
-            },
-            "optional": {
-                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
-                "latent_keyframe": ("LATENT_KEYFRAME", ),
-                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "inherit_missing": ("BOOLEAN", {"default": True}, ),
-                "guarantee_usage": ("BOOLEAN", {"default": True}, ),
-                "mask_optional": ("MASK", ),
-                #"interpolation": ([SI.LINEAR, SI.EASE_IN, SI.EASE_OUT, SI.EASE_IN_OUT, SI.NONE], {"default": SI.NONE}, ),
-            }
-        }
-    
-    RETURN_NAMES = ("TIMESTEP_KF", )
-    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframe"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
-                      start_percent: float,
-                      strength: float=1.0,
-                      cn_weights: ControlWeights=None, control_net_weights: ControlWeights=None, # old name
-                      latent_keyframe: LatentKeyframeGroup=None,
-                      prev_timestep_kf: TimestepKeyframeGroup=None, prev_timestep_keyframe: TimestepKeyframeGroup=None, # old name
-                      null_latent_kf_strength: float=0.0,
-                      inherit_missing=True,
-                      guarantee_usage=True,
-                      mask_optional=None,
-                      interpolation: str=SI.NONE,):
-        control_net_weights = control_net_weights if control_net_weights else cn_weights
-        prev_timestep_keyframe = prev_timestep_keyframe if prev_timestep_keyframe else prev_timestep_kf
-        if not prev_timestep_keyframe:
-            prev_timestep_keyframe = TimestepKeyframeGroup()
-        else:
-            prev_timestep_keyframe = prev_timestep_keyframe.clone()
-        keyframe = TimestepKeyframe(start_percent=start_percent, strength=strength, interpolation=interpolation, null_latent_kf_strength=null_latent_kf_strength,
-                                    control_weights=control_net_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing, guarantee_usage=guarantee_usage,
-                                    mask_hint_orig=mask_optional)
-        prev_timestep_keyframe.add(keyframe)
-        return (prev_timestep_keyframe,)
 
 
 class ControlNetLoaderAdvanced:
@@ -211,10 +161,12 @@ class AdvancedControlNetApply:
 NODE_CLASS_MAPPINGS = {
     # Keyframes
     "TimestepKeyframe": TimestepKeyframeNode,
+    "ACN_TimestepKeyframeInterpolation": TimestepKeyframeInterpolationNode,
+    "ACN_TimestepKeyframeFromStrengthList": TimestepKeyframeFromStrengthListNode,
     "LatentKeyframe": LatentKeyframeNode,
-    "LatentKeyframeGroup": LatentKeyframeGroupNode,
-    "LatentKeyframeBatchedGroup": LatentKeyframeBatchedGroupNode,
     "LatentKeyframeTiming": LatentKeyframeInterpolationNode,
+    "LatentKeyframeBatchedGroup": LatentKeyframeBatchedGroupNode,
+    "LatentKeyframeGroup": LatentKeyframeGroupNode,
     # Conditioning
     "ACN_AdvancedControlNetApply": AdvancedControlNetApply,
     # Loaders
@@ -247,10 +199,12 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     # Keyframes
     "TimestepKeyframe": "Timestep Keyframe 🛂🅐🅒🅝",
+    "ACN_TimestepKeyframeInterpolation": "Timestep Keyframe Interpolation 🛂🅐🅒🅝",
+    "ACN_TimestepKeyframeFromStrengthList": "Timestep Keyframe From List 🛂🅐🅒🅝",
     "LatentKeyframe": "Latent Keyframe 🛂🅐🅒🅝",
-    "LatentKeyframeGroup": "Latent Keyframe Group 🛂🅐🅒🅝",
-    "LatentKeyframeBatchedGroup": "Latent Keyframe Batched Group 🛂🅐🅒🅝",
     "LatentKeyframeTiming": "Latent Keyframe Interpolation 🛂🅐🅒🅝",
+    "LatentKeyframeBatchedGroup": "Latent Keyframe From List 🛂🅐🅒🅝",
+    "LatentKeyframeGroup": "Latent Keyframe Group 🛂🅐🅒🅝",
     # Conditioning
     "ACN_AdvancedControlNetApply": "Apply Advanced ControlNet 🛂🅐🅒🅝",
     # Loaders

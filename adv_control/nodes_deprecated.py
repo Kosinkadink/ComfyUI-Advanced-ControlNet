@@ -4,7 +4,7 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageOps
-from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, TimestepKeyframe, BIGMAX
+from .utils import BIGMAX
 from .logger import logger
 
 
@@ -24,7 +24,7 @@ class LoadImagesFromDirectory:
     RETURN_TYPES = ("IMAGE", "MASK", "INT")
     FUNCTION = "load_images"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/deprecated"
+    CATEGORY = ""
 
     def load_images(self, directory: str, image_load_cap: int = 0, start_index: int = 0):
         if not os.path.isdir(directory):
@@ -69,35 +69,3 @@ class LoadImagesFromDirectory:
             raise FileNotFoundError(f"No images could be loaded from directory '{directory}'.")
 
         return (torch.cat(images, dim=0), torch.stack(masks, dim=0), image_count)
-
-
-class TimestepKeyframeNodeDeprecated:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
-            },
-            "optional": {
-                "control_net_weights": ("CONTROL_NET_WEIGHTS", ),
-                "t2i_adapter_weights": ("T2I_ADAPTER_WEIGHTS", ),
-                "latent_keyframe": ("LATENT_KEYFRAME", ),
-                "prev_timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
-            }
-        }
-    
-    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframe"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
-                      start_percent: float,
-                      control_net_weights: ControlWeights=None,
-                      latent_keyframe: LatentKeyframeGroup=None,
-                      prev_timestep_keyframe: TimestepKeyframeGroup=None):
-        if not prev_timestep_keyframe:
-            prev_timestep_keyframe = TimestepKeyframeGroup()
-        keyframe = TimestepKeyframe(start_percent, control_net_weights, latent_keyframe)
-        prev_timestep_keyframe.add(keyframe)
-        return (prev_timestep_keyframe,)

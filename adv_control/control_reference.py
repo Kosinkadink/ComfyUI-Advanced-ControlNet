@@ -243,8 +243,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def get_effective_strength(self):
         effective_strength = self.strength
-        if self.current_timestep_keyframe is not None:
-            effective_strength = effective_strength * self.current_timestep_keyframe.strength
+        if self._current_timestep_keyframe is not None:
+            effective_strength = effective_strength * self._current_timestep_keyframe.strength
         return effective_strength
 
     def get_effective_attn_mask_or_float(self, x: Tensor, channels: int, is_mid: bool):
@@ -328,8 +328,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
         self.cond_hint = ref_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
-        self.should_apply_attn_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.attn_strength, 1.0))
-        self.should_apply_adain_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self.current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.adain_strength, 1.0))
+        self.should_apply_attn_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self._current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.attn_strength, 1.0))
+        self.should_apply_adain_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self._current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.adain_strength, 1.0))
         # prepare mask - use direct_attn, so the mask dims will match source latents (and be smaller)
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, direct_attn=True)
         self.should_apply_effective_masks = self.latent_keyframes is not None or self.mask_cond_hint is not None or self.tk_mask_cond_hint is not None
