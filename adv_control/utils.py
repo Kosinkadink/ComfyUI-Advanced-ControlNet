@@ -184,7 +184,7 @@ class TimestepKeyframe:
                  inherit_missing: bool = True,
                  guarantee_steps: int = 1,
                  mask_hint_orig: Tensor = None) -> None:
-        self.start_percent = start_percent
+        self.start_percent = float(start_percent)
         self.start_t = 999999999.9
         self.strength = strength
         self.control_weights = control_weights

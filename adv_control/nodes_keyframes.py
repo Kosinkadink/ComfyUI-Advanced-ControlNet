@@ -86,7 +86,7 @@ class TimestepKeyframeInterpolationNode:
     
     RETURN_NAMES = ("TIMESTEP_KF", )
     RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframes"
+    FUNCTION = "load_keyframe"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
 
@@ -144,7 +144,7 @@ class TimestepKeyframeFromStrengthListNode:
     
     RETURN_NAMES = ("TIMESTEP_KF", )
     RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframes"
+    FUNCTION = "load_keyframe"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
 
