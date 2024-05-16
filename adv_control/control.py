@@ -25,7 +25,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(12 - i)) for i in range(13)]
-        return ControlWeights.controlnet(raw_weights, self.weights.flip_weights)
+        return self.weights.copy_with_new_weights(raw_weights)
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
         # perform special version of get_control that supports sliding context and masks
@@ -99,7 +99,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         raw_weights = [(self.weights.base_multiplier ** float(7 - i)) for i in range(8)]
         raw_weights = [raw_weights[-8], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
         raw_weights = get_properly_arranged_t2i_weights(raw_weights)
-        return ControlWeights.t2iadapter(raw_weights, self.weights.flip_weights)
+        return self.weights.copy_with_new_weights(raw_weights)
 
     def get_calc_pow(self, idx: int, layers: int) -> int:
         # match how T2IAdapterAdvanced deals with universal weights
@@ -152,7 +152,7 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
     
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(9 - i)) for i in range(10)]
-        return ControlWeights.controllora(raw_weights, self.weights.flip_weights)
+        return self.weights.copy_with_new_weights(raw_weights)
 
     def copy(self):
         c = ControlLoraAdvanced(self.control_weights, self.timestep_keyframes, global_average_pooling=self.global_average_pooling)
