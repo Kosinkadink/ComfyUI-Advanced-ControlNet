@@ -1,14 +1,16 @@
 # ComfyUI-Advanced-ControlNet
 Nodes for scheduling ControlNet strength across timesteps and batched latents, as well as applying custom weights and attention masks. The ControlNet nodes here fully support sliding context sampling, like the one used in the  [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) nodes. Currently supports ControlNets, T2IAdapters, ControlLoRAs, ControlLLLite, SparseCtrls, SVD-ControlNets, and Reference.
 
-Custom weights allow replication of the "My prompt is more important" feature of Auto1111's sd-webui ControlNet extension.
+Custom weights allow replication of the "My prompt is more important" feature of Auto1111's sd-webui ControlNet extension via Soft Weights, and the "ControlNet is more important" feature can be granularly controlled by changing the uncond_multiplier on the same Soft Weights.
 
-ControlNet preprocessors are available through [comfyui_controlnet_aux](https://github.com/Fannovel16/comfyui_controlnet_aux) nodes
+ControlNet preprocessors are available through [comfyui_controlnet_aux](https://github.com/Fannovel16/comfyui_controlnet_aux) nodes.
 
 ## Features
 - Timestep and latent strength scheduling
 - Attention masks
-- Soft weights to replicate "My prompt is more important" feature from sd-webui ControlNet extension, and also change the scaling
+- Replicate ***"My prompt is more important"*** feature from sd-webui-controlnet extension via ***Soft Weights***, and allow softness to be tweaked via ***base_multiplier***
+- Replicate ***"ControlNet is more important"*** feature from sd-webui-controlnet extension via ***uncond_multiplier*** on ***Soft Weights***
+  - uncond_multiplier=0.0 gives identical results of auto1111's feature, but values between 0.0 and 1.0 can be used without issue to granularly control the setting.
 - ControlNet, T2IAdapter, and ControlLoRA support for sliding context windows
 - ControlLLLite support (requires model_optional to be passed into and out of Apply Advanced ControlNet node)
 - SparseCtrl support

@@ -25,7 +25,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(12 - i)) for i in range(13)]
-        return ControlWeights.controlnet(raw_weights, self.weights.flip_weights)
+        return self.weights.copy_with_new_weights(raw_weights)
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
         # perform special version of get_control that supports sliding context and masks
@@ -95,11 +95,28 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         super().__init__(t2i_model=t2i_model, channels_in=channels_in, compression_ratio=compression_ratio, upscale_algorithm=upscale_algorithm, device=device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.t2iadapter())
 
+    def control_merge_inject(self, control_input, control_output, control_prev, output_dtype):
+        # if has uncond multiplier, need to make sure control shapes are the same batch size as expected
+        if self.weights.has_uncond_multiplier:
+            if control_input is not None:
+                for i in range(len(control_input)):
+                    x = control_input[i]
+                    if x is not None:
+                        if x.size(0) < self.batch_size:
+                            control_input[i] = x.repeat(self.batched_number, 1, 1, 1)[:self.batch_size]
+            if control_output is not None:
+                for i in range(len(control_output)):
+                    x = control_output[i]
+                    if x is not None:
+                        if x.size(0) < self.batch_size:
+                            control_output[i] = x.repeat(self.batched_number, 1, 1, 1)[:self.batch_size]
+        return AdvancedControlBase.control_merge_inject(self, control_input, control_output, control_prev, output_dtype)
+
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(7 - i)) for i in range(8)]
         raw_weights = [raw_weights[-8], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
         raw_weights = get_properly_arranged_t2i_weights(raw_weights)
-        return ControlWeights.t2iadapter(raw_weights, self.weights.flip_weights)
+        return self.weights.copy_with_new_weights(raw_weights)
 
     def get_calc_pow(self, idx: int, layers: int) -> int:
         # match how T2IAdapterAdvanced deals with universal weights
@@ -152,7 +169,7 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
     
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(9 - i)) for i in range(10)]
-        return ControlWeights.controllora(raw_weights, self.weights.flip_weights)
+        return self.weights.copy_with_new_weights(raw_weights)
 
     def copy(self):
         c = ControlLoraAdvanced(self.control_weights, self.timestep_keyframes, global_average_pooling=self.global_average_pooling)
