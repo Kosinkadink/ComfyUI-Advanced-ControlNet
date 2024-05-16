@@ -520,6 +520,7 @@ class AdvancedControlBase:
         # timesteps
         self.t: Tensor = None
         self.batched_number: int = None
+        self.batch_size: int = 0
         # weights + override
         self.weights: ControlWeights = None
         self.weights_default: ControlWeights = weights_default
@@ -573,6 +574,7 @@ class AdvancedControlBase:
     def prepare_current_timestep(self, t: Tensor, batched_number: int):
         self.t = float(t[0])
         self.batched_number = batched_number
+        self.batch_size = len(t)
         # get current step percent
         curr_t: float = self.t
         prev_index = self._current_timestep_index
@@ -667,8 +669,6 @@ class AdvancedControlBase:
         return True
 
     def get_control_inject(self, x_noisy, t, cond, batched_number):
-        if type(batched_number) != IntWithCondOrUncond:
-            logger.warn(f"not IntWithCondOrUncond! {type(batched_number)}")
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
@@ -869,6 +869,7 @@ class AdvancedControlBase:
         self.context_length = 0
         self.t = None
         self.batched_number = None
+        self.batch_size = 0
         self.weights = None
         self.latent_keyframes = None
         # timestep stuff

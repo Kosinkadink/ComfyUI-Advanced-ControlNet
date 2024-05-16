@@ -95,6 +95,23 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         super().__init__(t2i_model=t2i_model, channels_in=channels_in, compression_ratio=compression_ratio, upscale_algorithm=upscale_algorithm, device=device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.t2iadapter())
 
+    def control_merge_inject(self, control_input, control_output, control_prev, output_dtype):
+        # if has uncond multiplier, need to make sure control shapes are the same batch size as expected
+        if self.weights.has_uncond_multiplier:
+            if control_input is not None:
+                for i in range(len(control_input)):
+                    x = control_input[i]
+                    if x is not None:
+                        if x.size(0) < self.batch_size:
+                            control_input[i] = x.repeat(self.batched_number, 1, 1, 1)[:self.batch_size]
+            if control_output is not None:
+                for i in range(len(control_output)):
+                    x = control_output[i]
+                    if x is not None:
+                        if x.size(0) < self.batch_size:
+                            control_output[i] = x.repeat(self.batched_number, 1, 1, 1)[:self.batch_size]
+        return AdvancedControlBase.control_merge_inject(self, control_input, control_output, control_prev, output_dtype)
+
     def get_universal_weights(self) -> ControlWeights:
         raw_weights = [(self.weights.base_multiplier ** float(7 - i)) for i in range(8)]
         raw_weights = [raw_weights[-8], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
