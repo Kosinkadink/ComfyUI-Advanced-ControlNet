@@ -244,4 +244,11 @@ class LLLiteModule(torch.nn.Module):
         cx = self.up(cx)
         if control.latent_keyframes is not None:
             cx = cx * control.calc_latent_keyframe_mults(x=cx, batched_number=control.batched_number)
+        if control.weights is not None and control.weights.has_uncond_multiplier:
+            cond_or_uncond = control.batched_number.cond_or_uncond
+            actual_length = cx.size(0) // control.batched_number
+            for idx, cond_type in enumerate(cond_or_uncond):
+                # if uncond, set to weight's uncond_multiplier
+                if cond_type == 1:
+                    cx[actual_length*idx:actual_length*(idx+1)] *= control.weights.uncond_multiplier
         return cx * mask * control.strength * control._current_timestep_keyframe.strength

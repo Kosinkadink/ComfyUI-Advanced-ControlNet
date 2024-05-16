@@ -519,7 +519,7 @@ class AdvancedControlBase:
         self.context_length = 0
         # timesteps
         self.t: Tensor = None
-        self.batched_number: int = None
+        self.batched_number: Union[int, IntWithCondOrUncond] = None
         self.batch_size: int = 0
         # weights + override
         self.weights: ControlWeights = None
