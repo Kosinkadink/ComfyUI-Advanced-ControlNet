@@ -81,7 +81,7 @@ def uncond_multiplier_check_cn_sample_factory(orig_comfy_sample: Callable, is_cu
             for tk in control.timestep_keyframes.keyframes:
                 if tk.has_control_weights() and tk.control_weights.has_uncond_multiplier:
                     return True
-        return False
+        return contains_uncond_multiplier(control.previous_controlnet)
 
     # check if positive or negative conds contain Adv. Cns that use multiply_negative on weights
     def uncond_multiplier_check_cn_sample(model: ModelPatcher, *args, **kwargs):
