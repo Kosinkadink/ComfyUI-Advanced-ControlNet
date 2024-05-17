@@ -10,6 +10,8 @@ import comfy.ops
 import comfy.utils
 import comfy.sample
 import comfy.samplers
+import comfy.model_base
+
 from comfy.controlnet import ControlBase, broadcast_image_to
 from comfy.model_patcher import ModelPatcher
 
@@ -31,15 +33,16 @@ def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_l
 def wrapper_len_factory(orig_len: Callable) -> Callable:
     def wrapper_len(*args, **kwargs):
         cond_or_uncond = args[0]
-        if type(cond_or_uncond) == list and (0 in cond_or_uncond or 1 in cond_or_uncond):
+        real_length = orig_len(*args, **kwargs)
+        if real_length > 0 and type(cond_or_uncond) == list and (cond_or_uncond[0] in [0, 1]):
             try:
-                to_return = IntWithCondOrUncond(orig_len(*args, **kwargs))
+                to_return = IntWithCondOrUncond(real_length)
                 setattr(to_return, "cond_or_uncond", cond_or_uncond)
                 return to_return
             finally:
                 __builtins__["len"] = orig_len
         else:
-            return orig_len(*args, **kwargs)
+            return real_length
     return wrapper_len
 
 # wrapping cond_cat function so that it will wrap around len function to get cond_or_uncond variable value
@@ -51,6 +54,17 @@ def wrapper_cond_cat_factory(orig_cond_cat: Callable):
     return wrapper_cond_cat
 orig_cond_cat = comfy.samplers.cond_cat
 comfy.samplers.cond_cat = wrapper_cond_cat_factory(orig_cond_cat)
+
+
+# wrapping apply_model so that len function will be cleaned up fairly soon after being injected
+def apply_model_uncond_cleanup_factory(orig_apply_model, orig_len):
+    def apply_model_uncond_cleanup_wrapper(self, *args, **kwargs):
+        __builtins__["len"] = orig_len
+        return orig_apply_model(self, *args, **kwargs)
+    return apply_model_uncond_cleanup_wrapper
+global_orig_len = __builtins__["len"]
+orig_apply_model = comfy.model_base.BaseModel.apply_model
+comfy.model_base.BaseModel.apply_model = apply_model_uncond_cleanup_factory(orig_apply_model, global_orig_len)
 
 
 def uncond_multiplier_check_cn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
@@ -86,16 +100,20 @@ def uncond_multiplier_check_cn_sample_factory(orig_comfy_sample: Callable, is_cu
                     has_uncond_multiplier = contains_uncond_multiplier(cond[1]["control"])
                     if has_uncond_multiplier:
                         break
-        # if uncond_multiplier found, continue to use wrapped version of function
-        if has_uncond_multiplier:
-            return orig_comfy_sample(model, *args, **kwargs)
-        # otherwise, use original version of function to prevent even the smallest of slowdowns (0.XX%)
         try:
-            wrapped_cond_cat = comfy.samplers.cond_cat
-            comfy.samplers.cond_cat = orig_cond_cat
-            return orig_comfy_sample(model, *args, **kwargs)
+            # if uncond_multiplier found, continue to use wrapped version of function
+            if has_uncond_multiplier:
+                return orig_comfy_sample(model, *args, **kwargs)
+            # otherwise, use original version of function to prevent even the smallest of slowdowns (0.XX%)
+            try:
+                wrapped_cond_cat = comfy.samplers.cond_cat
+                comfy.samplers.cond_cat = orig_cond_cat
+                return orig_comfy_sample(model, *args, **kwargs)
+            finally:
+                comfy.samplers.cond_cat = wrapped_cond_cat
         finally:
-            comfy.samplers.cond_cat = wrapped_cond_cat
+            # make sure len function is unwrapped by the time sampling is done, just in case
+            __builtins__["len"] = global_orig_len
     return uncond_multiplier_check_cn_sample
 # inject sample functions
 comfy.sample.sample = uncond_multiplier_check_cn_sample_factory(comfy.sample.sample)
