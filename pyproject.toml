@@ -10,6 +10,6 @@ Repository = "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet"
 
 #  Used by Comfy Registry https://comfyregistry.org
 [tool.comfy]
-PublisherId = ""
+PublisherId = "kosinkadink"
 DisplayName = "ComfyUI-Advanced-ControlNet"
 Icon = ""
