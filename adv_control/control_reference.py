@@ -62,7 +62,10 @@ def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callab
             for i, module in enumerate(attn_modules):
                 injection_holder = InjectionBasicTransformerBlockHolder(block=module, idx=i)
                 injection_holder.attn_weight = float(i) / float(len(attn_modules))
-                module._forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
+                if hasattr(module, "_forward"): # backward compatibility
+                    module._forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
+                else:
+                    module.forward = _forward_inject_BasicTransformerBlock.__get__(module, type(module))
                 module.injection_holder = injection_holder
                 reference_injections.attn_modules.append(module)
             # figure out which module is middle block
@@ -430,14 +433,20 @@ class BankStylesTimestepEmbedSequential:
 
 class InjectionBasicTransformerBlockHolder:
     def __init__(self, block: BasicTransformerBlock, idx=None):
-        self.original_forward = block._forward
+        if hasattr(block, "_forward"): # backward compatibility
+            self.original_forward = block._forward
+        else:
+            self.original_forward = block.forward
         self.idx = idx
         self.attn_weight = 1.0
         self.is_middle = False
         self.bank_styles = BankStylesBasicTransformerBlock()
     
     def restore(self, block: BasicTransformerBlock):
-        block._forward = self.original_forward
+        if hasattr(block, "_forward"): # backward compatibility
+            block._forward = self.original_forward
+        else:
+            block.forward = self.original_forward
 
     def clean(self):
         self.bank_styles.clean()
