@@ -107,28 +107,27 @@ class SparseModelPatcher(ModelPatcher):
         self.model: SparseControlNet
         super().__init__(*args, **kwargs)
     
-    def patch_model(self, device_to=None, patch_weights=True):
-        if patch_weights:
-            patched_model = super().patch_model(device_to)
-        else:
-            patched_model = super().patch_model(device_to, patch_weights)
-        try:
-            if self.model.motion_wrapper is not None:
-                self.model.motion_wrapper.to(device=device_to)
-        except Exception:
-            pass
-        return patched_model
+    def patch_model_lowvram(self, device_to=None, *args, **kwargs):
+        patched_model = super().patch_model_lowvram(device_to, *args, **kwargs)
 
-    def unpatch_model(self, device_to=None, unpatch_weights=True):
-        try:
-            if self.model.motion_wrapper is not None:
-                self.model.motion_wrapper.to(device=device_to)
-        except Exception:
-            pass
-        if unpatch_weights:
-            return super().unpatch_model(device_to)
-        else:
-            return super().unpatch_model(device_to, unpatch_weights)
+        if self.model.motion_wrapper is not None:
+            # figure out the tensors (likely pe's) that should be cast to device besides just the named_modules
+            remaining_tensors = list(self.model.motion_wrapper.state_dict().keys())
+            named_modules = []
+            for n, _ in self.model.motion_wrapper.named_modules():
+                named_modules.append(n)
+                named_modules.append(f"{n}.weight")
+                named_modules.append(f"{n}.bias")
+            for name in named_modules:
+                if name in remaining_tensors:
+                    remaining_tensors.remove(name)
+
+            for key in remaining_tensors:
+                self.patch_weight_to_device(key, device_to)
+                if device_to is not None:
+                    comfy.utils.set_attr(self.model.motion_wrapper, key, comfy.utils.get_attr(self.model.motion_wrapper, key).to(device_to))
+
+        return patched_model
 
     def clone(self):
         # normal ModelPatcher clone actions
@@ -325,7 +324,7 @@ def get_position_encoding_max_len(mm_state_dict: dict[str, Tensor], mm_name: str
 
 
 class SparseCtrlMotionWrapper(nn.Module):
-    def __init__(self, mm_state_dict: dict[str, Tensor]):
+    def __init__(self, mm_state_dict: dict[str, Tensor], ops=disable_weight_init_clean_groupnorm):
         super().__init__()
         self.down_blocks: Iterable[MotionModule] = None
         self.up_blocks: Iterable[MotionModule] = None
@@ -335,13 +334,13 @@ class SparseCtrlMotionWrapper(nn.Module):
         if get_down_block_max(mm_state_dict) > -1:
             self.down_blocks = nn.ModuleList([])
             for c in layer_channels:
-                self.down_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.DOWN))
+                self.down_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.DOWN, ops=ops))
         if get_up_block_max(mm_state_dict) > -1:
             self.up_blocks = nn.ModuleList([])
             for c in reversed(layer_channels):
-                self.up_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.UP))
+                self.up_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.UP, ops=ops))
         if has_mid_block(mm_state_dict):
-            self.mid_block = MotionModule(1280, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.MID)
+            self.mid_block = MotionModule(1280, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.MID, ops=ops)
 
     def inject(self, unet: SparseControlNet):
         # inject input (down) blocks
@@ -455,22 +454,22 @@ class SparseCtrlMotionWrapper(nn.Module):
 
 
 class MotionModule(nn.Module):
-    def __init__(self, in_channels, temporal_position_encoding_max_len=24, block_type: str=BlockType.DOWN):
+    def __init__(self, in_channels, temporal_position_encoding_max_len=24, block_type: str=BlockType.DOWN, ops=disable_weight_init_clean_groupnorm):
         super().__init__()
         if block_type == BlockType.MID:
             # mid blocks contain only a single VanillaTemporalModule
-            self.motion_modules: Iterable[VanillaTemporalModule] = nn.ModuleList([get_motion_module(in_channels, temporal_position_encoding_max_len)])
+            self.motion_modules: Iterable[VanillaTemporalModule] = nn.ModuleList([get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops)])
         else:
             # down blocks contain two VanillaTemporalModules
             self.motion_modules: Iterable[VanillaTemporalModule] = nn.ModuleList(
                 [
-                    get_motion_module(in_channels, temporal_position_encoding_max_len),
-                    get_motion_module(in_channels, temporal_position_encoding_max_len)
+                    get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops),
+                    get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops)
                 ]
             )
             # up blocks contain one additional VanillaTemporalModule
             if block_type == BlockType.UP:
-                self.motion_modules.append(get_motion_module(in_channels, temporal_position_encoding_max_len))
+                self.motion_modules.append(get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops))
     
     def set_video_length(self, video_length: int, full_length: int):
         for motion_module in self.motion_modules:
@@ -497,9 +496,9 @@ class MotionModule(nn.Module):
             motion_module.reset_temp_vars()
 
 
-def get_motion_module(in_channels, temporal_position_encoding_max_len):
+def get_motion_module(in_channels, temporal_position_encoding_max_len, ops=disable_weight_init_clean_groupnorm):
     # unlike normal AD, there is only one attention block expected in SparseCtrl models
-    return VanillaTemporalModule(in_channels=in_channels, attention_block_types=("Temporal_Self",), temporal_position_encoding_max_len=temporal_position_encoding_max_len)
+    return VanillaTemporalModule(in_channels=in_channels, attention_block_types=("Temporal_Self",), temporal_position_encoding_max_len=temporal_position_encoding_max_len, ops=ops)
 
 
 class VanillaTemporalModule(nn.Module):
@@ -514,6 +513,7 @@ class VanillaTemporalModule(nn.Module):
         temporal_position_encoding_max_len=24,
         temporal_attention_dim_div=1,
         zero_initialize=True,
+        ops=disable_weight_init_clean_groupnorm,
     ):
         super().__init__()
         self.strength = 1.0
@@ -528,6 +528,7 @@ class VanillaTemporalModule(nn.Module):
             cross_frame_attention_mode=cross_frame_attention_mode,
             temporal_position_encoding=temporal_position_encoding,
             temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+            ops=ops,
         )
 
         if zero_initialize:
@@ -585,6 +586,7 @@ class TemporalTransformer3DModel(nn.Module):
         cross_frame_attention_mode=None,
         temporal_position_encoding=False,
         temporal_position_encoding_max_len=24,
+        ops=disable_weight_init_clean_groupnorm,
     ):
         super().__init__()
         self.video_length = 16
@@ -599,10 +601,10 @@ class TemporalTransformer3DModel(nn.Module):
 
         inner_dim = num_attention_heads * attention_head_dim
 
-        self.norm = disable_weight_init_clean_groupnorm.GroupNorm(
+        self.norm = ops.GroupNorm(
             num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=True
         )
-        self.proj_in = nn.Linear(in_channels, inner_dim)
+        self.proj_in = ops.Linear(in_channels, inner_dim)
 
         self.transformer_blocks: Iterable[TemporalTransformerBlock] = nn.ModuleList(
             [
@@ -620,11 +622,12 @@ class TemporalTransformer3DModel(nn.Module):
                     cross_frame_attention_mode=cross_frame_attention_mode,
                     temporal_position_encoding=temporal_position_encoding,
                     temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+                    ops=ops,
                 )
                 for d in range(num_layers)
             ]
         )
-        self.proj_out = nn.Linear(inner_dim, in_channels)
+        self.proj_out = ops.Linear(inner_dim, in_channels)
 
     def set_video_length(self, video_length: int, full_length: int):
         self.video_length = video_length
@@ -748,6 +751,7 @@ class TemporalTransformerBlock(nn.Module):
         cross_frame_attention_mode=None,
         temporal_position_encoding=False,
         temporal_position_encoding_max_len=24,
+        ops=disable_weight_init_clean_groupnorm,
     ):
         super().__init__()
 
@@ -770,15 +774,16 @@ class TemporalTransformerBlock(nn.Module):
                     cross_frame_attention_mode=cross_frame_attention_mode,
                     temporal_position_encoding=temporal_position_encoding,
                     temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+                    ops=ops,
                 )
             )
-            norms.append(nn.LayerNorm(dim))
+            norms.append(ops.LayerNorm(dim))
 
         self.attention_blocks: Iterable[VersatileAttention] = nn.ModuleList(attention_blocks)
         self.norms = nn.ModuleList(norms)
 
-        self.ff = FeedForward(dim, dropout=dropout, glu=(activation_fn == "geglu"))
-        self.ff_norm = nn.LayerNorm(dim)
+        self.ff = FeedForward(dim, dropout=dropout, glu=(activation_fn == "geglu"), operations=ops)
+        self.ff_norm = ops.LayerNorm(dim)
 
     def set_scale_multiplier(self, multiplier: Union[float, None]):
         for block in self.attention_blocks:
@@ -848,7 +853,7 @@ class PositionalEncoding(nn.Module):
 
 class CrossAttentionMMSparse(nn.Module):
     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0., dtype=None, device=None,
-                 operations=comfy.ops.disable_weight_init):
+                 operations=disable_weight_init_clean_groupnorm):
         super().__init__()
         inner_dim = dim_head * heads
         context_dim = default(context_dim, query_dim)
@@ -903,10 +908,11 @@ class VersatileAttention(CrossAttentionMMSparse):
         cross_frame_attention_mode=None,
         temporal_position_encoding=False,
         temporal_position_encoding_max_len=24,
+        ops=disable_weight_init_clean_groupnorm,
         *args,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(operations=ops, *args, **kwargs)
         assert attention_mode == "Temporal"
 
         self.attention_mode = attention_mode

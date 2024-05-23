@@ -3,6 +3,7 @@ from torch import Tensor
 import torch
 import os
 
+import comfy.ops
 import comfy.utils
 import comfy.model_management
 import comfy.model_detection
@@ -551,13 +552,9 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
             motion_data[key] = controlnet_data.pop(key)
     if len(motion_data) == 0:
         raise ValueError(f"No motion-related keys in '{ckpt_path}'; not a valid SparseCtrl model!")
-    motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data).to(comfy.model_management.unet_dtype())
-    missing, unexpected = motion_wrapper.load_state_dict(motion_data)
-    if len(missing) > 0 or len(unexpected) > 0:
-        logger.info(f"SparseCtrlMotionWrapper: {missing}, {unexpected}")
 
     # now, load as if it was a normal controlnet - mostly copied from comfy load_controlnet function
-    controlnet_config = None
+    controlnet_config: dict[str] = None
     is_diffusers = False
     use_simplified_conditioning_embedding = False
     if "controlnet_cond_embedding.conv_in.weight" in controlnet_data:
@@ -680,6 +677,12 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
     filename = os.path.splitext(ckpt_path)[0]
     if filename.endswith("_shuffle") or filename.endswith("_shuffle_fp16"): #TODO: smarter way of enabling global_average_pooling
         global_average_pooling = True
+
+    # actually load motion portion of model now
+    motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data, ops=controlnet_config.get("operations", None)).to(comfy.model_management.unet_dtype())
+    missing, unexpected = motion_wrapper.load_state_dict(motion_data)
+    if len(missing) > 0 or len(unexpected) > 0:
+        logger.info(f"SparseCtrlMotionWrapper: {missing}, {unexpected}")
 
     # both motion portion and controlnet portions are loaded; bring them together if using motion model
     if sparse_settings.use_motion:
