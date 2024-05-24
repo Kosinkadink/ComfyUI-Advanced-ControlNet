@@ -179,16 +179,17 @@ class PreprocSparseRGBWrapper:
 
 
 class SparseSettings:
-    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False):
+    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False, expected_seq_len=32):
         self.sparse_method = sparse_method
         self.use_motion = use_motion
         self.motion_strength = motion_strength
         self.motion_scale = motion_scale
         self.merged = merged
+        self.expected_seq_len = expected_seq_len  # Add expected sequence length for positional encodings
     
     @classmethod
     def default(cls):
-        return SparseSettings(sparse_method=SparseSpreadMethod(), use_motion=True)
+        return SparseSettings(sparse_method=SparseSpreadMethod(), use_motion=True, expected_seq_len=32)
 
 
 class SparseMethod(ABC):
