@@ -25,12 +25,11 @@ from comfy.ldm.modules.attention import attention_basic, attention_pytorch, atte
 from comfy.ldm.modules.attention import FeedForward, SpatialTransformer
 from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential, ResBlock, Downsample
 from comfy.model_patcher import ModelPatcher
-from comfy.controlnet import broadcast_image_to
-from comfy.utils import repeat_to_batch_size
 import comfy.ops
 import comfy.model_management
 
-from .utils import TimestepKeyframeGroup, disable_weight_init_clean_groupnorm, prepare_mask_batch
+from .utils import (TimestepKeyframeGroup, disable_weight_init_clean_groupnorm,
+                    prepare_mask_batch, broadcast_image_to_extend, extend_to_batch_size)
 
 
 # until xformers bug is fixed, do not use xformers for VersatileAttention! TODO: change this when fix is out
@@ -560,8 +559,8 @@ class VanillaTemporalModule(nn.Module):
             return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)
         elif math.isclose(self.strength, 0.0):
             return input_tensor
-        elif self.strength > 1.0:
-            return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength
+        # elif self.strength > 1.0:
+        #     return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength
         else:
             return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength + input_tensor*(1.0-self.strength)
 
@@ -673,10 +672,10 @@ class TemporalTransformer3DModel(nn.Module):
         # otherwise, calculate temp mask
         self.prev_hidden_states_batch = batch
         mask = prepare_mask_batch(self.raw_scale_mask, shape=(self.full_length, 1, height, width))
-        mask = repeat_to_batch_size(mask, self.full_length)
+        mask = extend_to_batch_size(mask, self.full_length)
         # if mask not the same amount length as full length, make it match
         if self.full_length != mask.shape[0]:
-            mask = broadcast_image_to(mask, self.full_length, 1)
+            mask = broadcast_image_to_extend(mask, self.full_length, 1)
         # reshape mask to attention K shape (h*w, latent_count, 1)
         batch, channel, height, width = mask.shape
         # first, perform same operations as on hidden_states,

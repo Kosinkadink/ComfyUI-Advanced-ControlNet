@@ -8,14 +8,15 @@ import comfy.utils
 import comfy.model_management
 import comfy.model_detection
 import comfy.controlnet as comfy_cn
-from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
+from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter
 from comfy.model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
 from .control_lllite import LLLiteModule, LLLitePatch
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
-                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory)
+                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
+                    broadcast_image_to_extend, extend_to_batch_size)
 from .logger import logger
 
 
@@ -56,12 +57,15 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 del self.cond_hint
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            if self.sub_idxs is not None:
+                actual_cond_hint_orig = self.cond_hint_original
+                if self.cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
@@ -98,7 +102,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
 
     def control_merge_inject(self, control_input, control_output, control_prev, output_dtype):
         # if has uncond multiplier, need to make sure control shapes are the same batch size as expected
-        if self.weights.has_uncond_multiplier:
+        if self.weights.has_uncond_multiplier or self.weights.has_uncond_mask:
             if control_input is not None:
                 for i in range(len(control_input)):
                     x = control_input[i]
@@ -132,9 +136,12 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
             if self.sub_idxs is not None:
                 # cond hints
                 full_cond_hint_original = self.cond_hint_original
+                actual_cond_hint_orig = full_cond_hint_original
                 del self.cond_hint
                 self.cond_hint = None
-                self.cond_hint_original = full_cond_hint_original[self.sub_idxs]
+                if full_cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=full_cond_hint_original, batch_size=full_cond_hint_original.size(0))
+                self.cond_hint_original = actual_cond_hint_orig[self.sub_idxs]
             # mask hints
             self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
             return super().get_control(x_noisy, t, cond, batched_number)
@@ -222,12 +229,15 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
                 del self.cond_hint
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            if self.sub_idxs is not None:
+                actual_cond_hint_orig = self.cond_hint_original
+                if self.cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
@@ -328,7 +338,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             del cond_mask
         # make cond_hint match x_noisy batch
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
@@ -412,12 +422,15 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
                 del self.cond_hint
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            if self.sub_idxs is not None:
+                actual_cond_hint_orig = self.cond_hint_original
+                if self.cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
         # some special logic here compared to other controlnets:
         # * The cond_emb in attn patches will divide latent dims by 2 or 4, integer
         # * Due to this loss, the cond_emb will become smaller than x input if latent dims are not divisble by 2 or 4
