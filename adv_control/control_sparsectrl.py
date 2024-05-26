@@ -322,6 +322,81 @@ def get_position_encoding_max_len(mm_state_dict: dict[str, Tensor], mm_name: str
     raise ValueError(f"No pos_encoder.pe found in SparseCtrl state_dict - {mm_name} is not a valid SparseCtrl model!")
 
 
+class ViewSparseFuseMethod:
+    PYRAMID = "pyramid"
+
+    LIST = [PYRAMID]
+    @staticmethod
+    def create_weights_pyramid(length: int, **kwargs) -> list[float]:
+        # weight is based on the distance away from the edge of the context window;
+        # based on weighted average concept in FreeNoise paper
+        if length % 2 == 0:
+            max_weight = length // 2
+            weight_sequence = list(range(1, max_weight + 1, 1)) + list(range(max_weight, 0, -1))
+        else:
+            max_weight = (length + 1) // 2
+            weight_sequence = list(range(1, max_weight, 1)) + [max_weight] + list(range(max_weight - 1, 0, -1))
+        return weight_sequence
+    
+    FUSE_MAPPING = {
+        PYRAMID: create_weights_pyramid
+    }
+
+    @classmethod
+    def get_context_weights(cls, num_frames: int, fuse_method: str, sigma: Tensor = None):
+        weights_func = cls.FUSE_MAPPING.get(fuse_method, None)
+        if not weights_func:
+            raise ValueError(f"Unknown fuse_method '{fuse_method}'.")
+        return weights_func(num_frames, sigma=sigma )
+
+
+class ViewOptionsSparse:
+    def __init__(self, context_length: int=None, context_stride: int=None, context_overlap: int=None,
+                 context_schedule: str=None, closed_loop: bool=False, fuse_method: str=ViewSparseFuseMethod.PYRAMID,
+                 use_on_equal_length: bool=False):
+        # permanent settings
+        self.context_length = context_length
+        self.context_stride = context_stride
+        self.context_overlap = context_overlap
+        self.context_schedule = context_schedule
+        self.closed_loop = closed_loop
+        self.fuse_method = fuse_method
+        self.use_on_equal_length = use_on_equal_length
+
+
+class ViewSparseSchedule:
+    STATIC_STANDARD = "standard_static"
+
+    def create_windows_static_standard(num_frames: int, opts: ViewOptionsSparse):
+        windows = []
+        if num_frames <= opts.context_length:
+            windows.append(list(range(num_frames)))
+            return windows
+        # always return the same set of windows
+        delta = opts.context_length - opts.context_overlap
+        for start_idx in range(0, num_frames, delta):
+            # if past the end of frames, move start_idx back to allow same context_length
+            ending = start_idx + opts.context_length
+            if ending >= num_frames:
+                final_delta = ending - num_frames
+                final_start_idx = start_idx - final_delta
+                windows.append(list(range(final_start_idx, final_start_idx + opts.context_length)))
+                break
+            windows.append(list(range(start_idx, start_idx + opts.context_length)))
+        return windows
+    
+    VIEW_MAPPING = {
+        STATIC_STANDARD: create_windows_static_standard
+    }
+
+    @classmethod
+    def get_context_windows(cls, num_frames: int, opts: ViewOptionsSparse):
+        context_func = cls.VIEW_MAPPING.get(opts.context_schedule, None)
+        if not context_func:
+            raise ValueError(f"Unknown context_schedule '{opts.context_schedule}'.")
+        return context_func(num_frames, opts)
+
+
 class SparseCtrlMotionWrapper(nn.Module):
     def __init__(self, mm_state_dict: dict[str, Tensor], ops=disable_weight_init_clean_groupnorm):
         super().__init__()
@@ -783,6 +858,11 @@ class TemporalTransformerBlock(nn.Module):
 
         self.ff = FeedForward(dim, dropout=dropout, glu=(activation_fn == "geglu"), operations=ops)
         self.ff_norm = ops.LayerNorm(dim)
+        # all existing SparseCtrl models are intended for 16 frames
+        self.view_options = ViewOptionsSparse(context_length=16, context_overlap=12, context_stride=1,
+                                              context_schedule=ViewSparseSchedule.STATIC_STANDARD,
+                                              fuse_method=ViewSparseFuseMethod.PYRAMID)
+        self.view_options = None
 
     def set_scale_multiplier(self, multiplier: Union[float, None]):
         for block in self.attention_blocks:
@@ -798,26 +878,66 @@ class TemporalTransformerBlock(nn.Module):
 
     def forward(
         self,
-        hidden_states,
-        encoder_hidden_states=None,
-        attention_mask=None,
-        video_length=None,
-        scale_mask=None
+        hidden_states: Tensor,
+        encoder_hidden_states: Tensor=None,
+        attention_mask: Tensor=None,
+        video_length: int=None,
+        scale_mask: Tensor=None,
     ):
-        for attention_block, norm in zip(self.attention_blocks, self.norms):
-            norm_hidden_states = norm(hidden_states).to(hidden_states.dtype)
-            hidden_states = (
-                attention_block(
-                    norm_hidden_states,
-                    encoder_hidden_states=encoder_hidden_states
-                    if attention_block.is_cross_attention
-                    else None,
-                    attention_mask=attention_mask,
-                    video_length=video_length,
-                    scale_mask=scale_mask
+        view_options: ViewOptionsSparse=None
+        if self.view_options:
+            if self.view_options.context_length > video_length:
+                view_options = None
+            elif self.view_options.context_length == video_length and not self.view_options.use_on_equal_length:
+                view_options = None
+            else:
+                view_options = self.view_options
+
+        if not view_options:
+            for attention_block, norm in zip(self.attention_blocks, self.norms):
+                norm_hidden_states = norm(hidden_states).to(hidden_states.dtype)
+                hidden_states = (
+                    attention_block(
+                        norm_hidden_states,
+                        encoder_hidden_states=encoder_hidden_states
+                        if attention_block.is_cross_attention
+                        else None,
+                        attention_mask=attention_mask,
+                        video_length=video_length,
+                        scale_mask=scale_mask
+                    )
+                    + hidden_states
                 )
-                + hidden_states
-            )
+        else:
+            # copy of view impl from AnimateDiff-Evolved - more info available there in animatediff/motion_module_ad.py
+            # apply sliding context windows (views)
+            views = ViewSparseSchedule.get_context_windows(num_frames=video_length, opts=view_options)
+            hidden_states = rearrange(hidden_states, "(b f) d c -> b f d c", f=video_length)
+            value_final = torch.zeros_like(hidden_states)
+            count_final = torch.zeros_like(hidden_states)
+            batched_conds = hidden_states.size(1) // video_length
+            # perform view options
+            for sub_idxs in views:
+                sub_hidden_states = rearrange(hidden_states[:, sub_idxs], "b f d c -> (b f) d c")
+                for attention_block, norm in zip(self.attention_blocks, self.norms):
+                    norm_hidden_states = norm(sub_hidden_states).to(sub_hidden_states.dtype)
+                    sub_hidden_states = (
+                        attention_block(
+                            norm_hidden_states,
+                            encoder_hidden_states=encoder_hidden_states # do these need to be changed for sub_idxs too?
+                            if attention_block.is_cross_attention
+                            else None,
+                            attention_mask=attention_mask,
+                            video_length=len(sub_idxs),
+                            scale_mask=scale_mask[:, sub_idxs, :] if scale_mask is not None else scale_mask,
+                        ) + sub_hidden_states
+                    )
+                sub_hidden_states = rearrange(sub_hidden_states, "(b f) d c -> b f d c", f=len(sub_idxs))
+
+                weights = ViewSparseFuseMethod.get_context_weights(len(sub_idxs), view_options.fuse_method) * batched_conds
+                weights_tensor = torch.Tensor(weights).to(device=hidden_states.device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+                value_final[:, sub_idxs] += sub_hidden_states * weights_tensor
+                count_final[:, sub_idxs] += weights_tensor
 
         hidden_states = self.ff(self.ff_norm(hidden_states)) + hidden_states
 
@@ -842,7 +962,7 @@ class PositionalEncoding(nn.Module):
     def set_sub_idxs(self, sub_idxs: list[int]):
         self.sub_idxs = sub_idxs
 
-    def forward(self, x):
+    def forward(self, x, video_length: int):
         #if self.sub_idxs is not None:
         #    x = x + self.pe[:, self.sub_idxs]
         #else:
