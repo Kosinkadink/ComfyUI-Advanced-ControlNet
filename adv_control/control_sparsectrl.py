@@ -53,6 +53,12 @@ else:
         optimized_attention_mm = attention_sub_quad
 
 
+class SparseConst:
+    HINT_MULT = "sparse_hint_mult"
+    NONHINT_MULT = "sparse_nonhint_mult"
+    MASK_STRENGTH = "sparse_mask_strength"
+
+
 class SparseControlNet(ControlNetCLDM):
     def __init__(self, *args,**kwargs):
         super().__init__(*args, **kwargs)
@@ -179,12 +185,17 @@ class PreprocSparseRGBWrapper:
 
 
 class SparseSettings:
-    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False):
+    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False,
+                 sparse_mask_strength=1.0, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, context_aware=True):
         self.sparse_method = sparse_method
         self.use_motion = use_motion
         self.motion_strength = motion_strength
         self.motion_scale = motion_scale
         self.merged = merged
+        self.sparse_mask_strength = float(sparse_mask_strength)
+        self.sparse_hint_mult = float(sparse_hint_mult)
+        self.sparse_nonhint_mult = float(sparse_nonhint_mult)
+        self.context_aware = context_aware
     
     @classmethod
     def default(cls):

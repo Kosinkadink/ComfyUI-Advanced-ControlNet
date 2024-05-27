@@ -152,7 +152,7 @@ class ControlWeightType:
 
 class ControlWeights:
     def __init__(self, weight_type: str, base_multiplier: float=1.0, flip_weights: bool=False, weights: list[float]=None, weight_mask: Tensor=None,
-                 uncond_multiplier=1.0, uncond_mask: Tensor=None):
+                 uncond_multiplier=1.0, uncond_mask: Tensor=None, extras: dict[str]={},):
         self.weight_type = weight_type
         self.base_multiplier = base_multiplier
         self.flip_weights = flip_weights
@@ -164,6 +164,7 @@ class ControlWeights:
         self.has_uncond_multiplier = not math.isclose(self.uncond_multiplier, 1.0)
         self.uncond_mask = uncond_mask if uncond_mask is not None else 1.0
         self.has_uncond_mask = uncond_mask is not None
+        self.extras = extras
 
     def get(self, idx: int, default=1.0) -> Union[float, Tensor]:
         # if weights is not none, return index
@@ -176,44 +177,44 @@ class ControlWeights:
 
     def copy_with_new_weights(self, new_weights: list[float]):
         return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier, flip_weights=self.flip_weights,
-                              weights=new_weights, weight_mask=self.weight_mask, uncond_multiplier=self.uncond_multiplier)
+                              weights=new_weights, weight_mask=self.weight_mask, uncond_multiplier=self.uncond_multiplier, extras=self.extras)
 
     @classmethod
-    def default(cls):
-        return cls(ControlWeightType.DEFAULT)
+    def default(cls, extras: dict[str]={}):
+        return cls(ControlWeightType.DEFAULT, extras=extras)
 
     @classmethod
-    def universal(cls, base_multiplier: float, flip_weights: bool=False, uncond_multiplier: float=1.0):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+    def universal(cls, base_multiplier: float, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0):
-        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier)
+    def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             weights = [1.0]*12
-        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             weights = [1.0]*13
-        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllora(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def controllora(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             weights = [1.0]*10
-        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             # TODO: make this have a real value
             weights = [1.0]*200
-        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
 
 
 class StrengthInterpolation:
@@ -532,7 +533,7 @@ class WeightTypeException(TypeError):
 class AdvancedControlBase:
     def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False):
         self.base = base
-        self.compatible_weights = [ControlWeightType.UNIVERSAL]
+        self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
         self.add_compatible_weight(weights_default.weight_type)
         # mask for which parts of controlnet output to keep
         self.mask_cond_hint_original = None
@@ -585,7 +586,7 @@ class AdvancedControlBase:
         else:
             for tk in self.timestep_keyframes.keyframes:
                 if tk.has_control_weights() and tk.control_weights.weight_type not in self.compatible_weights:
-                    msg = f"Weight on Timestep Keyframe with start_percent={tk.start_percent} is type" + \
+                    msg = f"Weight on Timestep Keyframe with start_percent={tk.start_percent} is type " + \
                         f"{tk.control_weights.weight_type}, but loaded {type(self).__name__} only supports {self.compatible_weights} weights."
                     raise WeightTypeException(msg)
 
@@ -652,7 +653,7 @@ class AdvancedControlBase:
         self.prepare_weights()
     
     def prepare_weights(self):
-        if self.weights is None or self.weights.weight_type == ControlWeightType.DEFAULT:
+        if self.weights is None:
             self.weights = self.weights_default
         elif self.weights.weight_type == ControlWeightType.UNIVERSAL:
             # if universal and weight_mask present, no need to convert

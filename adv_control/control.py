@@ -11,7 +11,7 @@ import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter
 from comfy.model_patcher import ModelPatcher
 
-from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
+from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper, SparseConst
 from .control_lllite import LLLiteModule, LLLitePatch
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
@@ -306,11 +306,20 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             
             range_idxs = list(range(full_length)) if self.sub_idxs is None else self.sub_idxs
             hint_idxs = [] # idxs in cond_idxs
-            local_idxs = []  # idx to pun in final cond_hint
+            local_idxs = []  # idx to put in final cond_hint
             for i,cond_idx in enumerate(cond_idxs):
                 if cond_idx in range_idxs:
                     hint_idxs.append(i)
                     local_idxs.append(range_idxs.index(cond_idx))
+            # determine cond/uncond indexes that will get masked
+            self.local_sparse_idxs = []
+            self.local_sparse_idxs_inverse = list(range(x_noisy.size(0)))
+            for batch_idx in range(batched_number):
+                for i in local_idxs:
+                    actual_i = i+(batch_idx*actual_length)
+                    self.local_sparse_idxs.append(actual_i)
+                    if actual_i in self.local_sparse_idxs_inverse:
+                        self.local_sparse_idxs_inverse.remove(actual_i)
             # sub_cond_hint now contains the hints relevant to current x_noisy
             sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(self.device)
 
@@ -330,7 +339,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             # prepare cond_mask (b, 1, h, w)
             cond_shape[1] = 1
             cond_mask = torch.zeros(cond_shape).to(dtype).to(self.device)
-            cond_mask[local_idxs] = 1.0
+            cond_mask[local_idxs] = self.sparse_settings.sparse_mask_strength * self.weights.extras.get(SparseConst.MASK_STRENGTH, 1.0)
+            #cond_mask[local_idxs] = 2.5
             # combine cond_hint and cond_mask into (b, c+1, h, w)
             if not self.sparse_settings.merged:
                 self.cond_hint = torch.cat([self.cond_hint, cond_mask], dim=1)
@@ -353,6 +363,12 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
         return self.control_merge(None, control, control_prev, output_dtype)
 
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+        # apply mults to indexes with and without a direct condhint
+        x[self.local_sparse_idxs] *= self.sparse_settings.sparse_hint_mult * self.weights.extras.get(SparseConst.HINT_MULT, 1.0)
+        x[self.local_sparse_idxs_inverse] *= self.sparse_settings.sparse_nonhint_mult * self.weights.extras.get(SparseConst.NONHINT_MULT, 1.0)
+        return super().apply_advanced_strengths_and_masks(x, batched_number)
+
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)
         if type(self.cond_hint_original) == PreprocSparseRGBWrapper:
@@ -370,6 +386,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         if self.latent_format is not None:
             del self.latent_format
             self.latent_format = None
+        self.local_sparse_idxs = None
+        self.local_sparse_idxs_inverse = None
 
     def copy(self):
         c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)

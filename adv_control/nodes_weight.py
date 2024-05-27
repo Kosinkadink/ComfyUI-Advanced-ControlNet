@@ -11,6 +11,9 @@ class DefaultWeights:
     @classmethod
     def INPUT_TYPES(s):
         return {
+            "optional": {
+                "extras": ("CN_WEIGHTS_EXTRAS",),
+            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -19,8 +22,8 @@ class DefaultWeights:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
 
-    def load_weights(self):
-        weights = ControlWeights.default()
+    def load_weights(self, extras: dict[str]={}):
+        weights = ControlWeights.default(extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights))) 
 
 
@@ -37,6 +40,7 @@ class ScaledSoftMaskedUniversalWeights:
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "extras": ("CN_WEIGHTS_EXTRAS",),
             }
         }
     
@@ -47,7 +51,7 @@ class ScaledSoftMaskedUniversalWeights:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
 
     def load_weights(self, mask: Tensor, min_base_multiplier: float, max_base_multiplier: float, lock_min=False, lock_max=False,
-                     uncond_multiplier: float=1.0):
+                     uncond_multiplier: float=1.0, extras: dict[str]={}):
         # normalize mask
         mask = mask.clone()
         x_min = 0.0 if lock_min else mask.min()
@@ -56,7 +60,7 @@ class ScaledSoftMaskedUniversalWeights:
             mask = torch.ones_like(mask) * max_base_multiplier
         else:
             mask = linear_conversion(mask, x_min, x_max, min_base_multiplier, max_base_multiplier)
-        weights = ControlWeights.universal_mask(weight_mask=mask, uncond_multiplier=uncond_multiplier)
+        weights = ControlWeights.universal_mask(weight_mask=mask, uncond_multiplier=uncond_multiplier, extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
@@ -70,6 +74,7 @@ class ScaledSoftUniversalWeights:
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "extras": ("CN_WEIGHTS_EXTRAS",),
             }
         }
     
@@ -79,8 +84,8 @@ class ScaledSoftUniversalWeights:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
 
-    def load_weights(self, base_multiplier, flip_weights, uncond_multiplier: float=1.0):
-        weights = ControlWeights.universal(base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+    def load_weights(self, base_multiplier, flip_weights, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        weights = ControlWeights.universal(base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights))) 
 
 
@@ -106,6 +111,7 @@ class SoftControlNetWeights:
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "extras": ("CN_WEIGHTS_EXTRAS",),
             }
         }
     
@@ -117,10 +123,10 @@ class SoftControlNetWeights:
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                      weight_07, weight_08, weight_09, weight_10, weight_11, weight_12, flip_weights,
-                     uncond_multiplier: float=1.0):
+                     uncond_multiplier: float=1.0, extras: dict[str]={}):
         weights = [weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                    weight_07, weight_08, weight_09, weight_10, weight_11, weight_12]
-        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
@@ -146,6 +152,7 @@ class CustomControlNetWeights:
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "extras": ("CN_WEIGHTS_EXTRAS",),
             }
         }
     
@@ -157,10 +164,10 @@ class CustomControlNetWeights:
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                      weight_07, weight_08, weight_09, weight_10, weight_11, weight_12, flip_weights,
-                     uncond_multiplier: float=1.0):
+                     uncond_multiplier: float=1.0, extras: dict[str]={}):
         weights = [weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                    weight_07, weight_08, weight_09, weight_10, weight_11, weight_12]
-        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
@@ -177,6 +184,7 @@ class SoftT2IAdapterWeights:
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "extras": ("CN_WEIGHTS_EXTRAS",),
             }
         }
     
@@ -187,10 +195,10 @@ class SoftT2IAdapterWeights:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/T2IAdapter"
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, flip_weights,
-                     uncond_multiplier: float=1.0):
+                     uncond_multiplier: float=1.0, extras: dict[str]={}):
         weights = [weight_00, weight_01, weight_02, weight_03]
         weights = get_properly_arranged_t2i_weights(weights)
-        weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
@@ -207,6 +215,7 @@ class CustomT2IAdapterWeights:
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "extras": ("CN_WEIGHTS_EXTRAS",),
             }
         }
     
@@ -217,8 +226,8 @@ class CustomT2IAdapterWeights:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/T2IAdapter"
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, flip_weights,
-                     uncond_multiplier: float=1.0):
+                     uncond_multiplier: float=1.0, extras: dict[str]={}):
         weights = [weight_00, weight_01, weight_02, weight_03]
         weights = get_properly_arranged_t2i_weights(weights)
-        weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
