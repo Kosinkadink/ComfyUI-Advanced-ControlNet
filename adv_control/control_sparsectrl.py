@@ -210,21 +210,8 @@ class SparseMethod(ABC):
         self.method = method
 
     @abstractmethod
-    def get_indexes(self, hint_length: int, full_length: int, sub_idxs: list[int]=None) -> tuple[list[int], list[int]]:
+    def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         pass
-
-
-class SparseSpreadMethod(SparseMethod):
-    UNIFORM = "uniform"
-    STARTING = "starting"
-    ENDING = "ending"
-    CENTER = "center"
-
-    LIST = [UNIFORM, STARTING, ENDING, CENTER]
-
-    def __init__(self, spread=UNIFORM):
-        super().__init__(self.SPREAD)
-        self.spread = spread
 
     def get_indexes(self, hint_length: int, full_length: int, sub_idxs: list[int]=None) -> tuple[list[int], list[int]]:
         returned_idxs = self._get_indexes(hint_length, full_length)
@@ -279,6 +266,19 @@ class SparseSpreadMethod(SparseMethod):
             return [sub_idxs[0]], get_mapped_idxs([start_closest_idx])
         return [sub_idxs[-1]], get_mapped_idxs([end_closest_idx])
 
+
+class SparseSpreadMethod(SparseMethod):
+    UNIFORM = "uniform"
+    STARTING = "starting"
+    ENDING = "ending"
+    CENTER = "center"
+
+    LIST = [UNIFORM, STARTING, ENDING, CENTER]
+
+    def __init__(self, spread=UNIFORM):
+        super().__init__(self.SPREAD)
+        self.spread = spread
+
     def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         # if hint_length >= full_length, limit hints to full_length
         if hint_length >= full_length:
@@ -312,10 +312,9 @@ class SparseSpreadMethod(SparseMethod):
         return ValueError(f"Unrecognized spread: {self.spread}")
 
 
-class SparseIndexMethod(SparseSpreadMethod):
+class SparseIndexMethod(SparseMethod):
     def __init__(self, idxs: list[int]):
-        super().__init__()
-        self.method = self.INDEX
+        super().__init__(self.INDEX)
         self.idxs = idxs
 
     def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
