@@ -303,7 +303,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             self.cond_hint = None
             # first, figure out which cond idxs are relevant, and where they fit in
             cond_idxs, hint_order  = self.sparse_settings.sparse_method.get_indexes(hint_length=self.cond_hint_original.size(0), full_length=full_length,
-                                                                                     sub_idxs=self.sub_idxs if self.sparse_settings.context_aware else None)
+                                                                                     sub_idxs=self.sub_idxs if self.sparse_settings.is_context_aware() else None)
             range_idxs = list(range(full_length)) if self.sub_idxs is None else self.sub_idxs
             hint_idxs = [] # idxs in cond_idxs
             local_idxs = []  # idx to put in final cond_hint
@@ -345,8 +345,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             # prepare cond_mask (b, 1, h, w)
             cond_shape[1] = 1
             cond_mask = torch.zeros(cond_shape).to(dtype).to(self.device)
-            cond_mask[local_idxs] = self.sparse_settings.sparse_mask_strength * self.weights.extras.get(SparseConst.MASK_STRENGTH, 1.0)
-            #cond_mask[local_idxs] = 2.5
+            cond_mask[local_idxs] = self.sparse_settings.sparse_mask_mult * self.weights.extras.get(SparseConst.MASK_MULT, 1.0)
             # combine cond_hint and cond_mask into (b, c+1, h, w)
             if not self.sparse_settings.merged:
                 self.cond_hint = torch.cat([self.cond_hint, cond_mask], dim=1)

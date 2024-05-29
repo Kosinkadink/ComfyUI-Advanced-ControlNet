@@ -57,7 +57,7 @@ else:
 class SparseConst:
     HINT_MULT = "sparse_hint_mult"
     NONHINT_MULT = "sparse_nonhint_mult"
-    MASK_STRENGTH = "sparse_mask_strength"
+    MASK_MULT = "sparse_mask_mult"
 
 
 class SparseControlNet(ControlNetCLDM):
@@ -185,19 +185,29 @@ class PreprocSparseRGBWrapper:
         raise AttributeError(self.error_msg)
 
 
+class SparseContextAware:
+    NEAREST_HINT = "nearest_hint"
+    OFF = "off"
+
+    LIST = [NEAREST_HINT, OFF]
+
+
 class SparseSettings:
     def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False,
-                 sparse_mask_strength=1.0, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, context_aware=True):
+                 sparse_mask_mult=1.0, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, context_aware=SparseContextAware.NEAREST_HINT):
         self.sparse_method = sparse_method
         self.use_motion = use_motion
         self.motion_strength = motion_strength
         self.motion_scale = motion_scale
         self.merged = merged
-        self.sparse_mask_strength = float(sparse_mask_strength)
+        self.sparse_mask_mult = float(sparse_mask_mult)
         self.sparse_hint_mult = float(sparse_hint_mult)
         self.sparse_nonhint_mult = float(sparse_nonhint_mult)
         self.context_aware = context_aware
     
+    def is_context_aware(self):
+        return self.context_aware != SparseContextAware.OFF
+
     @classmethod
     def default(cls):
         return SparseSettings(sparse_method=SparseSpreadMethod(), use_motion=True)
