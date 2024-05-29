@@ -12,7 +12,7 @@ import comfy.sample
 import comfy.samplers
 import comfy.model_base
 
-from comfy.controlnet import ControlBase, broadcast_image_to
+from comfy.controlnet import ControlBase
 from comfy.model_patcher import ModelPatcher
 
 from .logger import logger
@@ -152,7 +152,7 @@ class ControlWeightType:
 
 class ControlWeights:
     def __init__(self, weight_type: str, base_multiplier: float=1.0, flip_weights: bool=False, weights: list[float]=None, weight_mask: Tensor=None,
-                 uncond_multiplier=1.0):
+                 uncond_multiplier=1.0, uncond_mask: Tensor=None, extras: dict[str]={},):
         self.weight_type = weight_type
         self.base_multiplier = base_multiplier
         self.flip_weights = flip_weights
@@ -162,6 +162,9 @@ class ControlWeights:
         self.weight_mask = weight_mask
         self.uncond_multiplier = float(uncond_multiplier)
         self.has_uncond_multiplier = not math.isclose(self.uncond_multiplier, 1.0)
+        self.uncond_mask = uncond_mask if uncond_mask is not None else 1.0
+        self.has_uncond_mask = uncond_mask is not None
+        self.extras = extras
 
     def get(self, idx: int, default=1.0) -> Union[float, Tensor]:
         # if weights is not none, return index
@@ -174,44 +177,44 @@ class ControlWeights:
 
     def copy_with_new_weights(self, new_weights: list[float]):
         return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier, flip_weights=self.flip_weights,
-                              weights=new_weights, weight_mask=self.weight_mask, uncond_multiplier=self.uncond_multiplier)
+                              weights=new_weights, weight_mask=self.weight_mask, uncond_multiplier=self.uncond_multiplier, extras=self.extras)
 
     @classmethod
-    def default(cls):
-        return cls(ControlWeightType.DEFAULT)
+    def default(cls, extras: dict[str]={}):
+        return cls(ControlWeightType.DEFAULT, extras=extras)
 
     @classmethod
-    def universal(cls, base_multiplier: float, flip_weights: bool=False, uncond_multiplier: float=1.0):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+    def universal(cls, base_multiplier: float, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0):
-        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier)
+    def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             weights = [1.0]*12
-        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             weights = [1.0]*13
-        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllora(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def controllora(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             weights = [1.0]*10
-        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0):
+    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
         if weights is None:
             # TODO: make this have a real value
             weights = [1.0]*200
-        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier)
+        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
 
 
 class StrengthInterpolation:
@@ -433,8 +436,15 @@ def normalize_min_max(x: Tensor, new_min = 0.0, new_max = 1.0):
 def linear_conversion(x, x_min=0.0, x_max=1.0, new_min=0.0, new_max=1.0):
     return (((x - x_min)/(x_max - x_min)) * (new_max - new_min)) + new_min
 
+def extend_to_batch_size(tensor: Tensor, batch_size: int):
+    if tensor.shape[0] > batch_size:
+        return tensor[:batch_size]
+    elif tensor.shape[0] < batch_size:
+        remainder = batch_size-tensor.shape[0]
+        return torch.cat([tensor] + [tensor[-1:]]*remainder, dim=0)
+    return tensor
 
-def broadcast_image_to_full(tensor, target_batch_size, batched_number, except_one=True):
+def broadcast_image_to_extend(tensor, target_batch_size, batched_number, except_one=True):
     current_batch_size = tensor.shape[0]
     #print(current_batch_size, target_batch_size)
     if except_one and current_batch_size == 1:
@@ -444,7 +454,7 @@ def broadcast_image_to_full(tensor, target_batch_size, batched_number, except_on
     tensor = tensor[:per_batch]
 
     if per_batch > tensor.shape[0]:
-        tensor = torch.cat([tensor] * (per_batch // tensor.shape[0]) + [tensor[:(per_batch % tensor.shape[0])]], dim=0)
+        tensor = extend_to_batch_size(tensor=tensor, batch_size=per_batch)
 
     current_batch_size = tensor.shape[0]
     if current_batch_size == target_batch_size:
@@ -523,7 +533,7 @@ class WeightTypeException(TypeError):
 class AdvancedControlBase:
     def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False):
         self.base = base
-        self.compatible_weights = [ControlWeightType.UNIVERSAL]
+        self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
         self.add_compatible_weight(weights_default.weight_type)
         # mask for which parts of controlnet output to keep
         self.mask_cond_hint_original = None
@@ -576,7 +586,7 @@ class AdvancedControlBase:
         else:
             for tk in self.timestep_keyframes.keyframes:
                 if tk.has_control_weights() and tk.control_weights.weight_type not in self.compatible_weights:
-                    msg = f"Weight on Timestep Keyframe with start_percent={tk.start_percent} is type" + \
+                    msg = f"Weight on Timestep Keyframe with start_percent={tk.start_percent} is type " + \
                         f"{tk.control_weights.weight_type}, but loaded {type(self).__name__} only supports {self.compatible_weights} weights."
                     raise WeightTypeException(msg)
 
@@ -643,7 +653,7 @@ class AdvancedControlBase:
         self.prepare_weights()
     
     def prepare_weights(self):
-        if self.weights is None or self.weights.weight_type == ControlWeightType.DEFAULT:
+        if self.weights is None:
             self.weights = self.weights_default
         elif self.weights.weight_type == ControlWeightType.UNIVERSAL:
             # if universal and weight_mask present, no need to convert
@@ -772,6 +782,8 @@ class AdvancedControlBase:
                 # if uncond, set to weight's uncond_multiplier
                 if cond_type == 1:
                     x[actual_length*idx:actual_length*(idx+1)] *= self.weights.uncond_multiplier
+        if self.weights.has_uncond_mask:
+            pass
 
         if self.latent_keyframes is not None:
             x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
@@ -860,12 +872,12 @@ class AdvancedControlBase:
                 # resize mask and match batch count
                 out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier)
                 actual_latent_length = x_noisy.shape[0] // batched_number
-                out_mask = comfy.utils.repeat_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
+                out_mask = extend_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
                 if self.sub_idxs is not None:
                     out_mask = out_mask[self.sub_idxs]
             # make cond_hint_mask length match x_noise
             if x_noisy.shape[0] != out_mask.shape[0]:
-                out_mask = broadcast_image_to(out_mask, x_noisy.shape[0], batched_number)
+                out_mask = broadcast_image_to_extend(out_mask, x_noisy.shape[0], batched_number)
             # default dtype to be same as x_noisy
             if dtype is None:
                 dtype = x_noisy.dtype

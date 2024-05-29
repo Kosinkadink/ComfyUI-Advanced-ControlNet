@@ -3,18 +3,20 @@ from torch import Tensor
 import torch
 import os
 
+import comfy.ops
 import comfy.utils
 import comfy.model_management
 import comfy.model_detection
 import comfy.controlnet as comfy_cn
-from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, broadcast_image_to
+from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter
 from comfy.model_patcher import ModelPatcher
 
-from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper
+from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper, SparseConst
 from .control_lllite import LLLiteModule, LLLitePatch
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, ControlWeightType, ControlWeights, WeightTypeException,
-                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory)
+                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
+                    broadcast_image_to_extend, extend_to_batch_size)
 from .logger import logger
 
 
@@ -55,12 +57,15 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 del self.cond_hint
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            if self.sub_idxs is not None:
+                actual_cond_hint_orig = self.cond_hint_original
+                if self.cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
@@ -97,7 +102,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
 
     def control_merge_inject(self, control_input, control_output, control_prev, output_dtype):
         # if has uncond multiplier, need to make sure control shapes are the same batch size as expected
-        if self.weights.has_uncond_multiplier:
+        if self.weights.has_uncond_multiplier or self.weights.has_uncond_mask:
             if control_input is not None:
                 for i in range(len(control_input)):
                     x = control_input[i]
@@ -131,9 +136,12 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
             if self.sub_idxs is not None:
                 # cond hints
                 full_cond_hint_original = self.cond_hint_original
+                actual_cond_hint_orig = full_cond_hint_original
                 del self.cond_hint
                 self.cond_hint = None
-                self.cond_hint_original = full_cond_hint_original[self.sub_idxs]
+                if full_cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=full_cond_hint_original, batch_size=full_cond_hint_original.size(0))
+                self.cond_hint_original = actual_cond_hint_orig[self.sub_idxs]
             # mask hints
             self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
             return super().get_control(x_noisy, t, cond, batched_number)
@@ -221,12 +229,15 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
                 del self.cond_hint
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            if self.sub_idxs is not None:
+                actual_cond_hint_orig = self.cond_hint_original
+                if self.cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
@@ -291,18 +302,33 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                 del self.cond_hint
             self.cond_hint = None
             # first, figure out which cond idxs are relevant, and where they fit in
-            cond_idxs = self.sparse_settings.sparse_method.get_indexes(hint_length=self.cond_hint_original.size(0), full_length=full_length)
-            
+            cond_idxs, hint_order  = self.sparse_settings.sparse_method.get_indexes(hint_length=self.cond_hint_original.size(0), full_length=full_length,
+                                                                                     sub_idxs=self.sub_idxs if self.sparse_settings.is_context_aware() else None)
             range_idxs = list(range(full_length)) if self.sub_idxs is None else self.sub_idxs
             hint_idxs = [] # idxs in cond_idxs
-            local_idxs = []  # idx to pun in final cond_hint
+            local_idxs = []  # idx to put in final cond_hint
             for i,cond_idx in enumerate(cond_idxs):
                 if cond_idx in range_idxs:
                     hint_idxs.append(i)
                     local_idxs.append(range_idxs.index(cond_idx))
+            # log_string = f"cond_idxs: {cond_idxs}, local_idxs: {local_idxs}, hint_idxs: {hint_idxs}, hint_order: {hint_order}"
+            # if self.sub_idxs is not None:
+            #     log_string += f" sub_idxs: {self.sub_idxs[0]}-{self.sub_idxs[-1]}"
+            # logger.warn(log_string)
+            # determine cond/uncond indexes that will get masked
+            self.local_sparse_idxs = []
+            self.local_sparse_idxs_inverse = list(range(x_noisy.size(0)))
+            for batch_idx in range(batched_number):
+                for i in local_idxs:
+                    actual_i = i+(batch_idx*actual_length)
+                    self.local_sparse_idxs.append(actual_i)
+                    if actual_i in self.local_sparse_idxs_inverse:
+                        self.local_sparse_idxs_inverse.remove(actual_i)
             # sub_cond_hint now contains the hints relevant to current x_noisy
-            sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(self.device)
-
+            if hint_order is None:
+                sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(self.device)
+            else:
+                sub_cond_hint = self.cond_hint_original[hint_order][hint_idxs].to(dtype).to(self.device)
             # scale cond_hints to match noisy input
             if self.control_model.use_simplified_conditioning_embedding:
                 # RGB SparseCtrl; the inputs are latents - use bilinear to avoid blocky artifacts
@@ -319,7 +345,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             # prepare cond_mask (b, 1, h, w)
             cond_shape[1] = 1
             cond_mask = torch.zeros(cond_shape).to(dtype).to(self.device)
-            cond_mask[local_idxs] = 1.0
+            cond_mask[local_idxs] = self.sparse_settings.sparse_mask_mult * self.weights.extras.get(SparseConst.MASK_MULT, 1.0)
             # combine cond_hint and cond_mask into (b, c+1, h, w)
             if not self.sparse_settings.merged:
                 self.cond_hint = torch.cat([self.cond_hint, cond_mask], dim=1)
@@ -327,7 +353,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             del cond_mask
         # make cond_hint match x_noisy batch
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
@@ -341,6 +367,12 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
         return self.control_merge(None, control, control_prev, output_dtype)
+
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+        # apply mults to indexes with and without a direct condhint
+        x[self.local_sparse_idxs] *= self.sparse_settings.sparse_hint_mult * self.weights.extras.get(SparseConst.HINT_MULT, 1.0)
+        x[self.local_sparse_idxs_inverse] *= self.sparse_settings.sparse_nonhint_mult * self.weights.extras.get(SparseConst.NONHINT_MULT, 1.0)
+        return super().apply_advanced_strengths_and_masks(x, batched_number)
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)
@@ -359,6 +391,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         if self.latent_format is not None:
             del self.latent_format
             self.latent_format = None
+        self.local_sparse_idxs = None
+        self.local_sparse_idxs_inverse = None
 
     def copy(self):
         c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)
@@ -411,12 +445,15 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
                 del self.cond_hint
             self.cond_hint = None
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            if self.sub_idxs is not None:
+                actual_cond_hint_orig = self.cond_hint_original
+                if self.cond_hint_original.size(0) < self.full_latent_length:
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
         # some special logic here compared to other controlnets:
         # * The cond_emb in attn patches will divide latent dims by 2 or 4, integer
         # * Due to this loss, the cond_emb will become smaller than x input if latent dims are not divisble by 2 or 4
@@ -551,13 +588,9 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
             motion_data[key] = controlnet_data.pop(key)
     if len(motion_data) == 0:
         raise ValueError(f"No motion-related keys in '{ckpt_path}'; not a valid SparseCtrl model!")
-    motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data).to(comfy.model_management.unet_dtype())
-    missing, unexpected = motion_wrapper.load_state_dict(motion_data)
-    if len(missing) > 0 or len(unexpected) > 0:
-        logger.info(f"SparseCtrlMotionWrapper: {missing}, {unexpected}")
 
     # now, load as if it was a normal controlnet - mostly copied from comfy load_controlnet function
-    controlnet_config = None
+    controlnet_config: dict[str] = None
     is_diffusers = False
     use_simplified_conditioning_embedding = False
     if "controlnet_cond_embedding.conv_in.weight" in controlnet_data:
@@ -680,6 +713,12 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
     filename = os.path.splitext(ckpt_path)[0]
     if filename.endswith("_shuffle") or filename.endswith("_shuffle_fp16"): #TODO: smarter way of enabling global_average_pooling
         global_average_pooling = True
+
+    # actually load motion portion of model now
+    motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data, ops=controlnet_config.get("operations", None)).to(comfy.model_management.unet_dtype())
+    missing, unexpected = motion_wrapper.load_state_dict(motion_data)
+    if len(missing) > 0 or len(unexpected) > 0:
+        logger.info(f"SparseCtrlMotionWrapper: {missing}, {unexpected}")
 
     # both motion portion and controlnet portions are loaded; bring them together if using motion model
     if sparse_settings.use_motion:

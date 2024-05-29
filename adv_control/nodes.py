@@ -10,7 +10,7 @@ from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, Sca
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
                               TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
-from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor
+from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
 from .nodes_reference import ReferenceControlNetNode, ReferenceControlFinetune, ReferencePreprocessorNode
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import LoadImagesFromDirectory
@@ -186,6 +186,7 @@ NODE_CLASS_MAPPINGS = {
     "ACN_SparseCtrlMergedLoaderAdvanced": SparseCtrlMergedLoaderAdvanced,
     "ACN_SparseCtrlIndexMethodNode": SparseIndexMethodNode,
     "ACN_SparseCtrlSpreadMethodNode": SparseSpreadMethodNode,
+    "ACN_SparseCtrlWeightExtras": SparseWeightExtras,
     # Reference
     "ACN_ReferencePreprocessor": ReferencePreprocessorNode,
     "ACN_ReferenceControlNet": ReferenceControlNetNode,
@@ -217,13 +218,14 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CustomControlNetWeights": "ControlNet Custom Weights 🛂🅐🅒🅝",
     "SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
-    "ACN_DefaultUniversalWeights": "Force Default Weights 🛂🅐🅒🅝",
+    "ACN_DefaultUniversalWeights": "Default Weights 🛂🅐🅒🅝",
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
     "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",
     "ACN_SparseCtrlMergedLoaderAdvanced": "🧪Load Merged SparseCtrl Model 🛂🅐🅒🅝",
     "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
     "ACN_SparseCtrlSpreadMethodNode": "SparseCtrl Spread Method 🛂🅐🅒🅝",
+    "ACN_SparseCtrlWeightExtras": "SparseCtrl Weight Extras 🛂🅐🅒🅝",
     # Reference
     "ACN_ReferencePreprocessor": "Reference Preproccessor 🛂🅐🅒🅝",
     "ACN_ReferenceControlNet": "Reference ControlNet 🛂🅐🅒🅝",

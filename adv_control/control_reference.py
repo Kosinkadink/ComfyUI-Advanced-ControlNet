@@ -14,7 +14,7 @@ from comfy.ldm.modules.diffusionmodules import openaimodel
 
 from .logger import logger
 from .utils import (AdvancedControlBase, ControlWeights, TimestepKeyframeGroup, AbstractPreprocWrapper,
-                    deepcopy_with_sharing, prepare_mask_batch, broadcast_image_to_full)
+                    deepcopy_with_sharing, prepare_mask_batch, broadcast_image_to_extend)
 
 
 def refcn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
@@ -326,7 +326,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
                 self.cond_hint_original,
                 x_noisy.shape[3], x_noisy.shape[2], 'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
-            self.cond_hint = broadcast_image_to_full(self.cond_hint, x_noisy.shape[0], batched_number, except_one=False)
+            self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number, except_one=False)
         # noise cond_hint based on sigma (current step)
         self.cond_hint = self.latent_format.process_in(self.cond_hint)
         self.cond_hint = ref_noise_latents(self.cond_hint, sigma=t, noise=None)

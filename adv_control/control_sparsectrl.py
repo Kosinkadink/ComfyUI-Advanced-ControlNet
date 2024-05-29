@@ -3,6 +3,7 @@
 #and then taken from comfy/cldm/cldm.py and modified again
 
 from abc import ABC, abstractmethod
+import copy
 import math
 import numpy as np
 from typing import Iterable, Union
@@ -24,27 +25,39 @@ from comfy.ldm.modules.attention import attention_basic, attention_pytorch, atte
 from comfy.ldm.modules.attention import FeedForward, SpatialTransformer
 from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential, ResBlock, Downsample
 from comfy.model_patcher import ModelPatcher
-from comfy.controlnet import broadcast_image_to
-from comfy.utils import repeat_to_batch_size
 import comfy.ops
 import comfy.model_management
 
-from .utils import TimestepKeyframeGroup, disable_weight_init_clean_groupnorm, prepare_mask_batch
+from .logger import logger
+from .utils import (BIGMAX, TimestepKeyframeGroup, disable_weight_init_clean_groupnorm,
+                    prepare_mask_batch, broadcast_image_to_extend, extend_to_batch_size)
 
 
 # until xformers bug is fixed, do not use xformers for VersatileAttention! TODO: change this when fix is out
 # logic for choosing optimized_attention method taken from comfy/ldm/modules/attention.py
+# a fallback_attention_mm is selected to avoid CUDA configuration limitation with pytorch's scaled_dot_product
 optimized_attention_mm = attention_basic
+fallback_attention_mm = attention_basic
 if comfy.model_management.xformers_enabled():
     pass
     #optimized_attention_mm = attention_xformers
 if comfy.model_management.pytorch_attention_enabled():
     optimized_attention_mm = attention_pytorch
+    if args.use_split_cross_attention:
+        fallback_attention_mm = attention_split
+    else:
+        fallback_attention_mm = attention_sub_quad
 else:
     if args.use_split_cross_attention:
         optimized_attention_mm = attention_split
     else:
         optimized_attention_mm = attention_sub_quad
+
+
+class SparseConst:
+    HINT_MULT = "sparse_hint_mult"
+    NONHINT_MULT = "sparse_nonhint_mult"
+    MASK_MULT = "sparse_mask_mult"
 
 
 class SparseControlNet(ControlNetCLDM):
@@ -100,28 +113,27 @@ class SparseModelPatcher(ModelPatcher):
         self.model: SparseControlNet
         super().__init__(*args, **kwargs)
     
-    def patch_model(self, device_to=None, patch_weights=True):
-        if patch_weights:
-            patched_model = super().patch_model(device_to)
-        else:
-            patched_model = super().patch_model(device_to, patch_weights)
-        try:
-            if self.model.motion_wrapper is not None:
-                self.model.motion_wrapper.to(device=device_to)
-        except Exception:
-            pass
-        return patched_model
+    def patch_model_lowvram(self, device_to=None, *args, **kwargs):
+        patched_model = super().patch_model_lowvram(device_to, *args, **kwargs)
 
-    def unpatch_model(self, device_to=None, unpatch_weights=True):
-        try:
-            if self.model.motion_wrapper is not None:
-                self.model.motion_wrapper.to(device=device_to)
-        except Exception:
-            pass
-        if unpatch_weights:
-            return super().unpatch_model(device_to)
-        else:
-            return super().unpatch_model(device_to, unpatch_weights)
+        if self.model.motion_wrapper is not None:
+            # figure out the tensors (likely pe's) that should be cast to device besides just the named_modules
+            remaining_tensors = list(self.model.motion_wrapper.state_dict().keys())
+            named_modules = []
+            for n, _ in self.model.motion_wrapper.named_modules():
+                named_modules.append(n)
+                named_modules.append(f"{n}.weight")
+                named_modules.append(f"{n}.bias")
+            for name in named_modules:
+                if name in remaining_tensors:
+                    remaining_tensors.remove(name)
+
+            for key in remaining_tensors:
+                self.patch_weight_to_device(key, device_to)
+                if device_to is not None:
+                    comfy.utils.set_attr(self.model.motion_wrapper, key, comfy.utils.get_attr(self.model.motion_wrapper, key).to(device_to))
+
+        return patched_model
 
     def clone(self):
         # normal ModelPatcher clone actions
@@ -173,14 +185,29 @@ class PreprocSparseRGBWrapper:
         raise AttributeError(self.error_msg)
 
 
+class SparseContextAware:
+    NEAREST_HINT = "nearest_hint"
+    OFF = "off"
+
+    LIST = [NEAREST_HINT, OFF]
+
+
 class SparseSettings:
-    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False):
+    def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False,
+                 sparse_mask_mult=1.0, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, context_aware=SparseContextAware.NEAREST_HINT):
         self.sparse_method = sparse_method
         self.use_motion = use_motion
         self.motion_strength = motion_strength
         self.motion_scale = motion_scale
         self.merged = merged
+        self.sparse_mask_mult = float(sparse_mask_mult)
+        self.sparse_hint_mult = float(sparse_hint_mult)
+        self.sparse_nonhint_mult = float(sparse_nonhint_mult)
+        self.context_aware = context_aware
     
+    def is_context_aware(self):
+        return self.context_aware != SparseContextAware.OFF
+
     @classmethod
     def default(cls):
         return SparseSettings(sparse_method=SparseSpreadMethod(), use_motion=True)
@@ -193,8 +220,61 @@ class SparseMethod(ABC):
         self.method = method
 
     @abstractmethod
-    def get_indexes(self, hint_length: int, full_length: int) -> list[int]:
+    def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         pass
+
+    def get_indexes(self, hint_length: int, full_length: int, sub_idxs: list[int]=None) -> tuple[list[int], list[int]]:
+        returned_idxs = self._get_indexes(hint_length, full_length)
+        if sub_idxs is None:
+            return returned_idxs, None
+        # need to map full indexes to condhint indexes
+        index_mapping = {}
+        for i, value in enumerate(returned_idxs):
+            index_mapping[value] = i
+        def get_mapped_idxs(idxs: list[int]):
+            return [index_mapping[idx] for idx in idxs]
+        # check if returned_idxs fit within subidxs
+        fitting_idxs = []
+        for sub_idx in sub_idxs:
+            if sub_idx in returned_idxs:
+                fitting_idxs.append(sub_idx)
+        # if have any fitting_idxs, deal with it
+        if len(fitting_idxs) > 0:
+            return fitting_idxs, get_mapped_idxs(fitting_idxs)
+
+        # since no returned_idxs fit in sub_idxs, need to get the next-closest hint images based on strategy
+        def get_closest_idx(target_idx: int, idxs: list[int]):
+            min_idx = -1
+            min_dist = BIGMAX
+            for idx in idxs:
+                new_dist = abs(idx-target_idx)
+                if new_dist < min_dist:
+                    min_idx = idx
+                    min_dist = new_dist
+                    if min_dist == 1:
+                        return min_idx, min_dist
+            return min_idx, min_dist
+        start_closest_idx, start_dist = get_closest_idx(sub_idxs[0], returned_idxs)
+        end_closest_idx, end_dist = get_closest_idx(sub_idxs[-1], returned_idxs)
+        # if only one cond hint exists, do special behavior 
+        if hint_length == 1:
+            # if same distance from start and end, 
+            if start_dist == end_dist:
+                # find center index of sub_idxs
+                center_idx = sub_idxs[np.linspace(0, len(sub_idxs)-1, 3, endpoint=True, dtype=int)[1]]
+                return [center_idx], get_mapped_idxs([start_closest_idx])
+            # otherwise, return closest
+            if start_dist < end_dist:
+                return [sub_idxs[0]], get_mapped_idxs([start_closest_idx])
+            return [sub_idxs[-1]], get_mapped_idxs([end_closest_idx])
+        # otherwise, select up to two closest images, or just 1, whichever one applies best
+        # if same distance from start and end, return two images to use 
+        if start_dist == end_dist:
+            return [sub_idxs[0], sub_idxs[-1]], get_mapped_idxs([start_closest_idx, end_closest_idx])
+        # else, use just one
+        if start_dist < end_dist:
+            return [sub_idxs[0]], get_mapped_idxs([start_closest_idx])
+        return [sub_idxs[-1]], get_mapped_idxs([end_closest_idx])
 
 
 class SparseSpreadMethod(SparseMethod):
@@ -209,7 +289,7 @@ class SparseSpreadMethod(SparseMethod):
         super().__init__(self.SPREAD)
         self.spread = spread
 
-    def get_indexes(self, hint_length: int, full_length: int) -> list[int]:
+    def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         # if hint_length >= full_length, limit hints to full_length
         if hint_length >= full_length:
             return list(range(full_length))
@@ -247,7 +327,7 @@ class SparseIndexMethod(SparseMethod):
         super().__init__(self.INDEX)
         self.idxs = idxs
 
-    def get_indexes(self, hint_length: int, full_length: int) -> list[int]:
+    def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         orig_hint_length = hint_length
         if hint_length > full_length:
             hint_length = full_length
@@ -318,7 +398,7 @@ def get_position_encoding_max_len(mm_state_dict: dict[str, Tensor], mm_name: str
 
 
 class SparseCtrlMotionWrapper(nn.Module):
-    def __init__(self, mm_state_dict: dict[str, Tensor]):
+    def __init__(self, mm_state_dict: dict[str, Tensor], ops=disable_weight_init_clean_groupnorm):
         super().__init__()
         self.down_blocks: Iterable[MotionModule] = None
         self.up_blocks: Iterable[MotionModule] = None
@@ -328,13 +408,13 @@ class SparseCtrlMotionWrapper(nn.Module):
         if get_down_block_max(mm_state_dict) > -1:
             self.down_blocks = nn.ModuleList([])
             for c in layer_channels:
-                self.down_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.DOWN))
+                self.down_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.DOWN, ops=ops))
         if get_up_block_max(mm_state_dict) > -1:
             self.up_blocks = nn.ModuleList([])
             for c in reversed(layer_channels):
-                self.up_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.UP))
+                self.up_blocks.append(MotionModule(c, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.UP, ops=ops))
         if has_mid_block(mm_state_dict):
-            self.mid_block = MotionModule(1280, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.MID)
+            self.mid_block = MotionModule(1280, temporal_position_encoding_max_len=self.encoding_max_len, block_type=BlockType.MID, ops=ops)
 
     def inject(self, unet: SparseControlNet):
         # inject input (down) blocks
@@ -448,22 +528,22 @@ class SparseCtrlMotionWrapper(nn.Module):
 
 
 class MotionModule(nn.Module):
-    def __init__(self, in_channels, temporal_position_encoding_max_len=24, block_type: str=BlockType.DOWN):
+    def __init__(self, in_channels, temporal_position_encoding_max_len=24, block_type: str=BlockType.DOWN, ops=disable_weight_init_clean_groupnorm):
         super().__init__()
         if block_type == BlockType.MID:
             # mid blocks contain only a single VanillaTemporalModule
-            self.motion_modules: Iterable[VanillaTemporalModule] = nn.ModuleList([get_motion_module(in_channels, temporal_position_encoding_max_len)])
+            self.motion_modules: Iterable[VanillaTemporalModule] = nn.ModuleList([get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops)])
         else:
             # down blocks contain two VanillaTemporalModules
             self.motion_modules: Iterable[VanillaTemporalModule] = nn.ModuleList(
                 [
-                    get_motion_module(in_channels, temporal_position_encoding_max_len),
-                    get_motion_module(in_channels, temporal_position_encoding_max_len)
+                    get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops),
+                    get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops)
                 ]
             )
             # up blocks contain one additional VanillaTemporalModule
             if block_type == BlockType.UP:
-                self.motion_modules.append(get_motion_module(in_channels, temporal_position_encoding_max_len))
+                self.motion_modules.append(get_motion_module(in_channels, temporal_position_encoding_max_len, ops=ops))
     
     def set_video_length(self, video_length: int, full_length: int):
         for motion_module in self.motion_modules:
@@ -490,9 +570,9 @@ class MotionModule(nn.Module):
             motion_module.reset_temp_vars()
 
 
-def get_motion_module(in_channels, temporal_position_encoding_max_len):
+def get_motion_module(in_channels, temporal_position_encoding_max_len, ops=disable_weight_init_clean_groupnorm):
     # unlike normal AD, there is only one attention block expected in SparseCtrl models
-    return VanillaTemporalModule(in_channels=in_channels, attention_block_types=("Temporal_Self",), temporal_position_encoding_max_len=temporal_position_encoding_max_len)
+    return VanillaTemporalModule(in_channels=in_channels, attention_block_types=("Temporal_Self",), temporal_position_encoding_max_len=temporal_position_encoding_max_len, ops=ops)
 
 
 class VanillaTemporalModule(nn.Module):
@@ -507,6 +587,7 @@ class VanillaTemporalModule(nn.Module):
         temporal_position_encoding_max_len=24,
         temporal_attention_dim_div=1,
         zero_initialize=True,
+        ops=disable_weight_init_clean_groupnorm,
     ):
         super().__init__()
         self.strength = 1.0
@@ -521,6 +602,7 @@ class VanillaTemporalModule(nn.Module):
             cross_frame_attention_mode=cross_frame_attention_mode,
             temporal_position_encoding=temporal_position_encoding,
             temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+            ops=ops,
         )
 
         if zero_initialize:
@@ -552,8 +634,8 @@ class VanillaTemporalModule(nn.Module):
             return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)
         elif math.isclose(self.strength, 0.0):
             return input_tensor
-        elif self.strength > 1.0:
-            return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength
+        # elif self.strength > 1.0:
+        #     return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength
         else:
             return self.temporal_transformer(input_tensor, encoder_hidden_states, attention_mask)*self.strength + input_tensor*(1.0-self.strength)
 
@@ -578,6 +660,7 @@ class TemporalTransformer3DModel(nn.Module):
         cross_frame_attention_mode=None,
         temporal_position_encoding=False,
         temporal_position_encoding_max_len=24,
+        ops=disable_weight_init_clean_groupnorm,
     ):
         super().__init__()
         self.video_length = 16
@@ -592,10 +675,10 @@ class TemporalTransformer3DModel(nn.Module):
 
         inner_dim = num_attention_heads * attention_head_dim
 
-        self.norm = disable_weight_init_clean_groupnorm.GroupNorm(
+        self.norm = ops.GroupNorm(
             num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=True
         )
-        self.proj_in = nn.Linear(in_channels, inner_dim)
+        self.proj_in = ops.Linear(in_channels, inner_dim)
 
         self.transformer_blocks: Iterable[TemporalTransformerBlock] = nn.ModuleList(
             [
@@ -613,11 +696,12 @@ class TemporalTransformer3DModel(nn.Module):
                     cross_frame_attention_mode=cross_frame_attention_mode,
                     temporal_position_encoding=temporal_position_encoding,
                     temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+                    ops=ops,
                 )
                 for d in range(num_layers)
             ]
         )
-        self.proj_out = nn.Linear(inner_dim, in_channels)
+        self.proj_out = ops.Linear(inner_dim, in_channels)
 
     def set_video_length(self, video_length: int, full_length: int):
         self.video_length = video_length
@@ -641,6 +725,8 @@ class TemporalTransformer3DModel(nn.Module):
         del self.temp_scale_mask
         self.temp_scale_mask = None
         self.prev_hidden_states_batch = 0
+        for block in self.transformer_blocks:
+            block.reset_temp_vars()
 
     def get_scale_mask(self, hidden_states: Tensor) -> Union[Tensor, None]:
         # if no raw mask, return None
@@ -661,10 +747,10 @@ class TemporalTransformer3DModel(nn.Module):
         # otherwise, calculate temp mask
         self.prev_hidden_states_batch = batch
         mask = prepare_mask_batch(self.raw_scale_mask, shape=(self.full_length, 1, height, width))
-        mask = repeat_to_batch_size(mask, self.full_length)
+        mask = extend_to_batch_size(mask, self.full_length)
         # if mask not the same amount length as full length, make it match
         if self.full_length != mask.shape[0]:
-            mask = broadcast_image_to(mask, self.full_length, 1)
+            mask = broadcast_image_to_extend(mask, self.full_length, 1)
         # reshape mask to attention K shape (h*w, latent_count, 1)
         batch, channel, height, width = mask.shape
         # first, perform same operations as on hidden_states,
@@ -739,6 +825,7 @@ class TemporalTransformerBlock(nn.Module):
         cross_frame_attention_mode=None,
         temporal_position_encoding=False,
         temporal_position_encoding_max_len=24,
+        ops=disable_weight_init_clean_groupnorm,
     ):
         super().__init__()
 
@@ -761,15 +848,16 @@ class TemporalTransformerBlock(nn.Module):
                     cross_frame_attention_mode=cross_frame_attention_mode,
                     temporal_position_encoding=temporal_position_encoding,
                     temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+                    ops=ops,
                 )
             )
-            norms.append(nn.LayerNorm(dim))
+            norms.append(ops.LayerNorm(dim))
 
         self.attention_blocks: Iterable[VersatileAttention] = nn.ModuleList(attention_blocks)
         self.norms = nn.ModuleList(norms)
 
-        self.ff = FeedForward(dim, dropout=dropout, glu=(activation_fn == "geglu"))
-        self.ff_norm = nn.LayerNorm(dim)
+        self.ff = FeedForward(dim, dropout=dropout, glu=(activation_fn == "geglu"), operations=ops)
+        self.ff_norm = ops.LayerNorm(dim)
 
     def set_scale_multiplier(self, multiplier: Union[float, None]):
         for block in self.attention_blocks:
@@ -778,6 +866,10 @@ class TemporalTransformerBlock(nn.Module):
     def set_sub_idxs(self, sub_idxs: list[int]):
         for block in self.attention_blocks:
             block.set_sub_idxs(sub_idxs)
+
+    def reset_temp_vars(self):
+        for block in self.attention_blocks:
+            block.reset_temp_vars()
 
     def forward(
         self,
@@ -833,13 +925,14 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class CrossAttentionMM(nn.Module):
+class CrossAttentionMMSparse(nn.Module):
     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0., dtype=None, device=None,
-                 operations=comfy.ops.disable_weight_init):
+                 operations=disable_weight_init_clean_groupnorm):
         super().__init__()
         inner_dim = dim_head * heads
         context_dim = default(context_dim, query_dim)
 
+        self.actual_attention = optimized_attention_mm
         self.heads = heads
         self.dim_head = dim_head
         self.scale = None
@@ -849,6 +942,9 @@ class CrossAttentionMM(nn.Module):
         self.to_v = operations.Linear(context_dim, inner_dim, bias=False, dtype=dtype, device=device)
 
         self.to_out = nn.Sequential(operations.Linear(inner_dim, query_dim, dtype=dtype, device=device), nn.Dropout(dropout))
+
+    def reset_attention_type(self):
+        self.actual_attention = optimized_attention_mm
 
     def forward(self, x, context=None, value=None, mask=None, scale_mask=None):
         q = self.to_q(x)
@@ -868,21 +964,29 @@ class CrossAttentionMM(nn.Module):
         if scale_mask is not None:
             k *= scale_mask
 
-        out = optimized_attention_mm(q, k, v, self.heads, mask)
+        try:
+            out = self.actual_attention(q, k, v, self.heads, mask)
+        except RuntimeError as e:
+            if str(e).startswith("CUDA error: invalid configuration argument"):
+                self.actual_attention = fallback_attention_mm
+                out = self.actual_attention(q, k, v, self.heads, mask)
+            else:
+                raise
         return self.to_out(out)
 
 
-class VersatileAttention(CrossAttentionMM):
+class VersatileAttention(CrossAttentionMMSparse):
     def __init__(
         self,
         attention_mode=None,
         cross_frame_attention_mode=None,
         temporal_position_encoding=False,
         temporal_position_encoding_max_len=24,
+        ops=disable_weight_init_clean_groupnorm,
         *args,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(operations=ops, *args, **kwargs)
         assert attention_mode == "Temporal"
 
         self.attention_mode = attention_mode
@@ -910,6 +1014,9 @@ class VersatileAttention(CrossAttentionMM):
     def set_sub_idxs(self, sub_idxs: list[int]):
         if self.pos_encoder != None:
             self.pos_encoder.set_sub_idxs(sub_idxs)
+
+    def reset_temp_vars(self):
+        self.reset_attention_type()
 
     def forward(
         self,
