@@ -28,7 +28,8 @@ from comfy.model_patcher import ModelPatcher
 import comfy.ops
 import comfy.model_management
 
-from .utils import (TimestepKeyframeGroup, disable_weight_init_clean_groupnorm,
+from .logger import logger
+from .utils import (BIGMAX, TimestepKeyframeGroup, disable_weight_init_clean_groupnorm,
                     prepare_mask_batch, broadcast_image_to_extend, extend_to_batch_size)
 
 
@@ -209,7 +210,7 @@ class SparseMethod(ABC):
         self.method = method
 
     @abstractmethod
-    def get_indexes(self, hint_length: int, full_length: int) -> list[int]:
+    def get_indexes(self, hint_length: int, full_length: int, sub_idxs: list[int]=None) -> tuple[list[int], list[int]]:
         pass
 
 
@@ -225,7 +226,60 @@ class SparseSpreadMethod(SparseMethod):
         super().__init__(self.SPREAD)
         self.spread = spread
 
-    def get_indexes(self, hint_length: int, full_length: int) -> list[int]:
+    def get_indexes(self, hint_length: int, full_length: int, sub_idxs: list[int]=None) -> tuple[list[int], list[int]]:
+        returned_idxs = self._get_indexes(hint_length, full_length)
+        if sub_idxs is None:
+            return returned_idxs, None
+        # need to map full indexes to condhint indexes
+        index_mapping = {}
+        for i, value in enumerate(returned_idxs):
+            index_mapping[value] = i
+        def get_mapped_idxs(idxs: list[int]):
+            return [index_mapping[idx] for idx in idxs]
+        # check if returned_idxs fit within subidxs
+        fitting_idxs = []
+        for sub_idx in sub_idxs:
+            if sub_idx in returned_idxs:
+                fitting_idxs.append(sub_idx)
+        # if have any fitting_idxs, deal with it
+        if len(fitting_idxs) > 0:
+            return fitting_idxs, get_mapped_idxs(fitting_idxs)
+
+        # since no returned_idxs fit in sub_idxs, need to get the next-closest hint images based on strategy
+        def get_closest_idx(target_idx: int, idxs: list[int]):
+            min_idx = -1
+            min_dist = BIGMAX
+            for idx in idxs:
+                new_dist = abs(idx-target_idx)
+                if new_dist < min_dist:
+                    min_idx = idx
+                    min_dist = new_dist
+                    if min_dist == 1:
+                        return min_idx, min_dist
+            return min_idx, min_dist
+        start_closest_idx, start_dist = get_closest_idx(sub_idxs[0], returned_idxs)
+        end_closest_idx, end_dist = get_closest_idx(sub_idxs[-1], returned_idxs)
+        # if only one cond hint exists, do special behavior 
+        if hint_length == 1:
+            # if same distance from start and end, 
+            if start_dist == end_dist:
+                # find center index of sub_idxs
+                center_idx = sub_idxs[np.linspace(0, len(sub_idxs)-1, 3, endpoint=True, dtype=int)[1]]
+                return [center_idx], get_mapped_idxs([start_closest_idx])
+            # otherwise, return closest
+            if start_dist < end_dist:
+                return [sub_idxs[0]], get_mapped_idxs([start_closest_idx])
+            return [sub_idxs[-1]], get_mapped_idxs([end_closest_idx])
+        # otherwise, select up to two closest images, or just 1, whichever one applies best
+        # if same distance from start and end, return two images to use 
+        if start_dist == end_dist:
+            return [sub_idxs[0], sub_idxs[-1]], get_mapped_idxs([start_closest_idx, end_closest_idx])
+        # else, use just one
+        if start_dist < end_dist:
+            return [sub_idxs[0]], get_mapped_idxs([start_closest_idx])
+        return [sub_idxs[-1]], get_mapped_idxs([end_closest_idx])
+
+    def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         # if hint_length >= full_length, limit hints to full_length
         if hint_length >= full_length:
             return list(range(full_length))
@@ -258,12 +312,13 @@ class SparseSpreadMethod(SparseMethod):
         return ValueError(f"Unrecognized spread: {self.spread}")
 
 
-class SparseIndexMethod(SparseMethod):
+class SparseIndexMethod(SparseSpreadMethod):
     def __init__(self, idxs: list[int]):
-        super().__init__(self.INDEX)
+        super().__init__()
+        self.method = self.INDEX
         self.idxs = idxs
 
-    def get_indexes(self, hint_length: int, full_length: int) -> list[int]:
+    def _get_indexes(self, hint_length: int, full_length: int) -> list[int]:
         orig_hint_length = hint_length
         if hint_length > full_length:
             hint_length = full_length

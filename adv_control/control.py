@@ -302,8 +302,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                 del self.cond_hint
             self.cond_hint = None
             # first, figure out which cond idxs are relevant, and where they fit in
-            cond_idxs = self.sparse_settings.sparse_method.get_indexes(hint_length=self.cond_hint_original.size(0), full_length=full_length)
-            
+            cond_idxs, hint_order  = self.sparse_settings.sparse_method.get_indexes(hint_length=self.cond_hint_original.size(0), full_length=full_length,
+                                                                                     sub_idxs=self.sub_idxs if self.sparse_settings.context_aware else None)
             range_idxs = list(range(full_length)) if self.sub_idxs is None else self.sub_idxs
             hint_idxs = [] # idxs in cond_idxs
             local_idxs = []  # idx to put in final cond_hint
@@ -311,6 +311,10 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                 if cond_idx in range_idxs:
                     hint_idxs.append(i)
                     local_idxs.append(range_idxs.index(cond_idx))
+            # log_string = f"cond_idxs: {cond_idxs}, local_idxs: {local_idxs}, hint_idxs: {hint_idxs}, hint_order: {hint_order}"
+            # if self.sub_idxs is not None:
+            #     log_string += f" sub_idxs: {self.sub_idxs[0]}-{self.sub_idxs[-1]}"
+            # logger.warn(log_string)
             # determine cond/uncond indexes that will get masked
             self.local_sparse_idxs = []
             self.local_sparse_idxs_inverse = list(range(x_noisy.size(0)))
@@ -321,8 +325,10 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                     if actual_i in self.local_sparse_idxs_inverse:
                         self.local_sparse_idxs_inverse.remove(actual_i)
             # sub_cond_hint now contains the hints relevant to current x_noisy
-            sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(self.device)
-
+            if hint_order is None:
+                sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(self.device)
+            else:
+                sub_cond_hint = self.cond_hint_original[hint_order][hint_idxs].to(dtype).to(self.device)
             # scale cond_hints to match noisy input
             if self.control_model.use_simplified_conditioning_embedding:
                 # RGB SparseCtrl; the inputs are latents - use bilinear to avoid blocky artifacts
