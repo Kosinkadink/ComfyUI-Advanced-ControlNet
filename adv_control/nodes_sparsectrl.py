@@ -175,7 +175,7 @@ class SparseWeightExtras:
     def INPUT_TYPES(s):
         return {
             "optional": {
-                "extras": ("CN_WEIGHTS_EXTRAS",),
+                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
                 "sparse_hint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "sparse_nonhint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "sparse_mask_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
@@ -183,14 +183,14 @@ class SparseWeightExtras:
         }
     
     RETURN_TYPES = ("CN_WEIGHTS_EXTRAS", )
-    RETURN_NAMES = ("extras", )
+    RETURN_NAMES = ("cn_extras", )
     FUNCTION = "create_weight_extras"
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/extras"
 
-    def create_weight_extras(self, extras: dict[str]={}, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, sparse_mask_mult=1.0):
-        extras = extras.copy()
-        extras[SparseConst.HINT_MULT] = sparse_hint_mult
-        extras[SparseConst.NONHINT_MULT] = sparse_nonhint_mult
-        extras[SparseConst.MASK_MULT] = sparse_mask_mult
-        return (extras, )
+    def create_weight_extras(self, cn_extras: dict[str]={}, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, sparse_mask_mult=1.0):
+        cn_extras = cn_extras.copy()
+        cn_extras[SparseConst.HINT_MULT] = sparse_hint_mult
+        cn_extras[SparseConst.NONHINT_MULT] = sparse_nonhint_mult
+        cn_extras[SparseConst.MASK_MULT] = sparse_mask_mult
+        return (cn_extras, )
