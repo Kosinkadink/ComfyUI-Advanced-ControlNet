@@ -146,7 +146,8 @@ class SparseModelPatcher(ModelPatcher):
 
         n.object_patches = self.object_patches.copy()
         n.model_options = copy.deepcopy(self.model_options)
-        n.model_keys = self.model_keys
+        if hasattr(n, "model_keys"):
+            n.model_keys = self.model_keys
         if hasattr(n, "backup"):
             self.backup = n.backup
         if hasattr(n, "object_patches_backup"):
