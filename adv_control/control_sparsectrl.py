@@ -196,6 +196,11 @@ class SparseContextAware:
 class SparseSettings:
     def __init__(self, sparse_method: 'SparseMethod', use_motion: bool=True, motion_strength=1.0, motion_scale=1.0, merged=False,
                  sparse_mask_mult=1.0, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, context_aware=SparseContextAware.NEAREST_HINT):
+        # account for Steerable-Motion workflow incompatibility;
+        # doing this to for my own peace of mind (not an issue with my code)
+        if type(sparse_method) == str:
+            logger.warn("Outdated Steerable-Motion workflow detected; attempting to auto-convert indexes input. If you experience an error here, consult Steerable-Motion github, NOT Advanced-ControlNet.")
+            sparse_method = SparseIndexMethod(get_idx_list_from_str(sparse_method))
         self.sparse_method = sparse_method
         self.use_motion = use_motion
         self.motion_strength = motion_strength
@@ -354,6 +359,25 @@ class SparseIndexMethod(SparseMethod):
             real_idxs.add(real_idx)
             new_idxs.append(real_idx)
         return new_idxs  
+
+
+def get_idx_list_from_str(indexes: str) -> list[int]:
+    idxs = []
+    unique_idxs = set()
+    # get indeces from string
+    str_idxs = [x.strip() for x in indexes.strip().split(",")]
+    for str_idx in str_idxs:
+        try:
+            idx = int(str_idx)
+            if idx in unique_idxs:
+                raise ValueError(f"'{idx}' is duplicated; indexes must be unique.")
+            idxs.append(idx)
+            unique_idxs.add(idx)
+        except ValueError:
+            raise ValueError(f"'{str_idx}' is not a valid integer index.")
+    if len(idxs) == 0:
+        raise ValueError(f"No indexes were listed in Sparse Index Method.")
+    return idxs
 
 
 #########################################

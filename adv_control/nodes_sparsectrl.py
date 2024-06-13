@@ -6,7 +6,7 @@ import comfy.utils
 from comfy.sd import VAE
 
 from .utils import TimestepKeyframeGroup
-from .control_sparsectrl import SparseMethod, SparseIndexMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper, SparseConst, SparseContextAware
+from .control_sparsectrl import SparseMethod, SparseIndexMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper, SparseConst, SparseContextAware, get_idx_list_from_str
 from .control import load_sparsectrl, load_controlnet, ControlNetAdvanced, SparseCtrlAdvanced
 
 
@@ -103,21 +103,7 @@ class SparseIndexMethodNode:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
 
     def get_method(self, indexes: str):
-        idxs = []
-        unique_idxs = set()
-        # get indeces from string
-        str_idxs = [x.strip() for x in indexes.strip().split(",")]
-        for str_idx in str_idxs:
-            try:
-                idx = int(str_idx)
-                if idx in unique_idxs:
-                    raise ValueError(f"'{idx}' is duplicated; indexes must be unique.")
-                idxs.append(idx)
-                unique_idxs.add(idx)
-            except ValueError:
-                raise ValueError(f"'{str_idx}' is not a valid integer index.")
-        if len(idxs) == 0:
-            raise ValueError(f"No indexes were listed in Sparse Index Method.")
+        idxs = get_idx_list_from_str(indexes)
         return (SparseIndexMethod(idxs),)
 
 
