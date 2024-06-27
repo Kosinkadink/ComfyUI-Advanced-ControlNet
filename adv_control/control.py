@@ -124,6 +124,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         indeces = [7 - i for i in range(8)]
         indeces = [indeces[-8], indeces[-3], indeces[-2], indeces[-1]]
         indeces = get_properly_arranged_t2i_weights(indeces)
+        indeces.reverse()  # need to reverse to match recent ComfyUI changes
         return indeces[idx]
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
