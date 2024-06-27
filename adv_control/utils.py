@@ -167,12 +167,21 @@ class ControlWeights:
         self.has_uncond_mask = uncond_mask is not None
         self.extras = extras
 
-    def get(self, idx: int, default=1.0) -> Union[float, Tensor]:
+    def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
         # if weights is not none, return index
         if self.weights is not None:
-            # this implies weights list is not aligning with expectations - will need to adjust code
-            if idx >= len(self.weights):
-                return default
+            # if middle weight, need to pretend index is actually after all the output weights (if applicable)
+            if key == "middle" and "output" in control:
+                idx += len(control["output"])
+
+            if key == "output":
+                # this implies weights list is not aligning with expectations - will need to adjust code
+                if idx >= len(self.weights)-1:
+                    return default
+            else:
+                # this implies weights list is not aligning with expectations - will need to adjust code
+                if idx >= len(self.weights):
+                    return default
             return self.weights[idx]
         return 1.0
 
@@ -677,7 +686,7 @@ class AdvancedControlBase:
     def set_cond_hint_inject(self, *args, **kwargs):
         to_return = self.base.set_cond_hint(*args, **kwargs)
         # if vae required, look in args and kwargs for it
-        if self.require_vae is not None:
+        if self.require_vae:
             # check args first, as that's the default way vae param is used in ComfyUI
             for arg in args:
                 if isinstance(arg, VAE):
@@ -735,16 +744,16 @@ class AdvancedControlBase:
             control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
         return control_prev
 
-    def calc_weight(self, idx: int, x: Tensor, layers: int) -> Union[float, Tensor]:
+    def calc_weight(self, idx: int, x: Tensor, control: dict[str, list[Tensor]], key: str) -> Union[float, Tensor]:
         if self.weights.weight_mask is not None:
             # prepare weight mask
             self.prepare_weight_mask_cond_hint(x, self.batched_number)
             # adjust mask for current layer and return
-            return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, layers=layers))
-        return self.weights.get(idx=idx)
+            return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, control=control, key=key))
+        return self.weights.get(idx=idx, control=control, key=key)
     
-    def get_calc_pow(self, idx: int, layers: int) -> int:
-        return (layers-1)-idx
+    def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
+        return (len(control[key])-1)-idx
 
     def calc_latent_keyframe_mults(self, x: Tensor, batched_number: int) -> Tensor:
         # apply strengths, and get batch indeces to null out
@@ -834,7 +843,7 @@ class AdvancedControlBase:
                     if x not in applied_to: #memory saving strategy, allow shared tensors and only apply strength to shared tensors once
                         applied_to.add(x)
                         self.apply_advanced_strengths_and_masks(x, self.batched_number)
-                        x *= self.strength * self.calc_weight(i, x, len(control_output))
+                        x *= self.strength * self.calc_weight(i, x, control, key)
 
                     if x.dtype != output_dtype:
                         x = x.to(output_dtype)
