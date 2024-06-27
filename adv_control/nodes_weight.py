@@ -198,6 +198,7 @@ class SoftT2IAdapterWeights:
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
         weights = [weight_00, weight_01, weight_02, weight_03]
         weights = get_properly_arranged_t2i_weights(weights)
+        weights.reverse()  # to account for recent ComfyUI changes
         weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
@@ -229,5 +230,6 @@ class CustomT2IAdapterWeights:
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
         weights = [weight_00, weight_01, weight_02, weight_03]
         weights = get_properly_arranged_t2i_weights(weights)
+        weights.reverse()  # to account for recent ComfyUI changes
         weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))

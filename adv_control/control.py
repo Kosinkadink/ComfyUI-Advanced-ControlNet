@@ -116,6 +116,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         raw_weights = [(self.weights.base_multiplier ** float(7 - i)) for i in range(8)]
         raw_weights = [raw_weights[-8], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
         raw_weights = get_properly_arranged_t2i_weights(raw_weights)
+        raw_weights.reverse()  # need to reverse to match recent ComfyUI changes
         return self.weights.copy_with_new_weights(raw_weights)
 
     def get_calc_pow(self, idx: int, layers: int) -> int:
