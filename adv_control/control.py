@@ -270,7 +270,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
         self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
-        self.latent_format = None
+        self.model_latent_format = None  # latent format for active SD model, NOT controlnet
         self.preprocessed = False
     
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
@@ -332,7 +332,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             # scale cond_hints to match noisy input
             if self.control_model.use_simplified_conditioning_embedding:
                 # RGB SparseCtrl; the inputs are latents - use bilinear to avoid blocky artifacts
-                sub_cond_hint = self.latent_format.process_in(sub_cond_hint)  # multiplies by model scale factor
+                sub_cond_hint = self.model_latent_format.process_in(sub_cond_hint)  # multiplies by model scale factor
                 sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3], x_noisy.shape[2], "nearest-exact", "center").to(dtype).to(self.device)
             else:
                 # other SparseCtrl; inputs are typical images
@@ -380,7 +380,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             if not self.control_model.use_simplified_conditioning_embedding:
                 raise ValueError("Any model besides RGB SparseCtrl should NOT have its images go through the RGB SparseCtrl preprocessor.")
             self.cond_hint_original = self.cond_hint_original.condhint
-        self.latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
+        self.model_latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
         if self.control_model.motion_wrapper is not None:
             self.control_model.motion_wrapper.reset()
             self.control_model.motion_wrapper.set_strength(self.sparse_settings.motion_strength)
@@ -388,9 +388,9 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
     def cleanup_advanced(self):
         super().cleanup_advanced()
-        if self.latent_format is not None:
-            del self.latent_format
-            self.latent_format = None
+        if self.model_latent_format is not None:
+            del self.model_latent_format
+            self.model_latent_format = None
         self.local_sparse_idxs = None
         self.local_sparse_idxs_inverse = None
 
