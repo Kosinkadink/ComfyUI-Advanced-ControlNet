@@ -228,7 +228,9 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, device=None):
         super().__init__(device)
-        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), allow_condhint_latents=True, require_vae=True)
+        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), allow_condhint_latents=True)
+        # TODO: allow vae_optional to be used instead of preprocessor
+        #require_vae=True
         self.ref_opts = ref_opts
         self.order = 0
         self.model_latent_format = None

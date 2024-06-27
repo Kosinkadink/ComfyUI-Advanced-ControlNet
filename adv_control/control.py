@@ -265,7 +265,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
         if self.control_model.use_simplified_conditioning_embedding:
-            self.require_vae = True
+            # TODO: allow vae_optional to be used instead of preprocessor
+            #self.require_vae = True
             self.allow_condhint_latents = True
         self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
         self.model_latent_format = None  # latent format for active SD model, NOT controlnet
