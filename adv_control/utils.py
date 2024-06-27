@@ -14,6 +14,7 @@ import comfy.model_base
 
 from comfy.controlnet import ControlBase
 from comfy.model_patcher import ModelPatcher
+from comfy.sd import VAE
 
 from .logger import logger
 
@@ -531,7 +532,7 @@ class WeightTypeException(TypeError):
 
 
 class AdvancedControlBase:
-    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False):
+    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False, require_vae=False, allow_condhint_latents=False):
         self.base = base
         self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
         self.add_compatible_weight(weights_default.weight_type)
@@ -564,8 +565,13 @@ class AdvancedControlBase:
         self.pre_run = self.pre_run_inject
         self.cleanup = self.cleanup_inject
         self.set_previous_controlnet = self.set_previous_controlnet_inject
-        # require model to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
+        self.set_cond_hint = self.set_cond_hint_inject
+        # vae to store
+        self.adv_vae = None
+        # require model/vae to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
         self.require_model = require_model
+        self.require_vae = require_vae
+        self.allow_condhint_latents = allow_condhint_latents
         # disarm - when set to False, used to force usage of Apply Advanced ControlNet 🛂🅐🅒🅝 node (which will set it to True)
         self.disarmed = not require_model
     
@@ -667,6 +673,21 @@ class AdvancedControlBase:
     def set_cond_hint_mask(self, mask_hint):
         self.mask_cond_hint_original = mask_hint
         return self
+
+    def set_cond_hint_inject(self, *args, **kwargs):
+        to_return = self.base.set_cond_hint(*args, **kwargs)
+        # if vae required, look in args and kwargs for it
+        if self.require_vae is not None:
+            # check args first, as that's the default way vae param is used in ComfyUI
+            for arg in args:
+                if isinstance(arg, VAE):
+                    self.adv_vae = arg
+                    break
+            # if not in args, check kwargs now
+            if self.adv_vae is None:
+                if 'vae' in kwargs:
+                    self.adv_vae = kwargs['vae']
+        return to_return
 
     def pre_run_inject(self, model, percent_to_timestep_function):
         self.base.pre_run(model, percent_to_timestep_function)
@@ -798,41 +819,28 @@ class AdvancedControlBase:
         if self._current_timestep_keyframe.strength != 1.0:
             x[:] *= self._current_timestep_keyframe.strength
     
-    def control_merge_inject(self: 'AdvancedControlBase', control_input, control_output, control_prev, output_dtype):
+    def control_merge_inject(self: 'AdvancedControlBase', control: dict[str, list[Tensor]], control_prev: dict, output_dtype):
         out = {'input':[], 'middle':[], 'output': []}
 
-        if control_input is not None:
-            for i in range(len(control_input)):
-                key = 'input'
-                x = control_input[i]
-                if x is not None:
-                    self.apply_advanced_strengths_and_masks(x, self.batched_number)
-
-                    x *= self.strength * self.calc_weight(i, x, len(control_input))
-                    if x.dtype != output_dtype:
-                        x = x.to(output_dtype)
-                out[key].insert(0, x)
-
-        if control_output is not None:
+        for key in control:
+            control_output = control[key]
+            applied_to = set()
             for i in range(len(control_output)):
-                if i == (len(control_output) - 1):
-                    key = 'middle'
-                    index = 0
-                else:
-                    key = 'output'
-                    index = i
                 x = control_output[i]
                 if x is not None:
-                    self.apply_advanced_strengths_and_masks(x, self.batched_number)
-
                     if self.global_average_pooling:
                         x = torch.mean(x, dim=(2, 3), keepdim=True).repeat(1, 1, x.shape[2], x.shape[3])
 
-                    x *= self.strength * self.calc_weight(i, x, len(control_output))
+                    if x not in applied_to: #memory saving strategy, allow shared tensors and only apply strength to shared tensors once
+                        applied_to.add(x)
+                        self.apply_advanced_strengths_and_masks(x, self.batched_number)
+                        x *= self.strength * self.calc_weight(i, x, len(control_output))
+
                     if x.dtype != output_dtype:
                         x = x.to(output_dtype)
 
                 out[key].append(x)
+
         if control_prev is not None:
             for x in ['input', 'middle', 'output']:
                 o = out[x]
@@ -847,7 +855,7 @@ class AdvancedControlBase:
                             if o[i].shape[0] < prev_val.shape[0]:
                                 o[i] = prev_val + o[i]
                             else:
-                                o[i] += prev_val
+                                o[i] = prev_val + o[i]  # TODO from base ComfyUI: change back to inplace add if shared tensors stop being an issue
         return out
 
     def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
@@ -924,4 +932,7 @@ class AdvancedControlBase:
         copied.mask_cond_hint_original = self.mask_cond_hint_original
         copied.weights_override = self.weights_override
         copied.latent_keyframe_override = self.latent_keyframe_override
+        copied.adv_vae = self.adv_vae
+        copied.require_vae = self.require_vae
+        copied.allow_condhint_latents = self.allow_condhint_latents
         copied.disarmed = self.disarmed

@@ -311,7 +311,8 @@ class SVDControlNet(nn.Module):
 
         guided_hint = self.input_hint_block(hint, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
 
-        outs = []
+        out_output = []
+        out_middle = []
 
         hs = []
         if self.num_classes is not None:
@@ -326,12 +327,12 @@ class SVDControlNet(nn.Module):
                 guided_hint = None
             else:
                 h = module(h, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-            outs.append(zero_conv(h, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator))
+            out_output.append(zero_conv(h, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator))
 
         h = self.middle_block(h, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-        outs.append(self.middle_block_out(h, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator))
+        out_middle.append(self.middle_block_out(h, emb, context, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator))
 
-        return outs
+        return {"middle": out_middle, "output": out_output}
 
 
 TEMPORAL_TRANSFORMER_BLOCKS = {

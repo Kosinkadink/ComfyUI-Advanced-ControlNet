@@ -23,13 +23,13 @@ from comfy.cldm.cldm import ControlNet as ControlNetCLDM
 from comfy.ldm.modules.attention import SpatialTransformer
 from comfy.ldm.modules.attention import attention_basic, attention_pytorch, attention_split, attention_sub_quad, default
 from comfy.ldm.modules.attention import FeedForward, SpatialTransformer
-from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential, ResBlock, Downsample
+from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential
 from comfy.model_patcher import ModelPatcher
 import comfy.ops
 import comfy.model_management
 
 from .logger import logger
-from .utils import (BIGMAX, TimestepKeyframeGroup, disable_weight_init_clean_groupnorm,
+from .utils import (BIGMAX, AbstractPreprocWrapper, disable_weight_init_clean_groupnorm,
                     prepare_mask_batch, broadcast_image_to_extend, extend_to_batch_size)
 
 
@@ -85,7 +85,8 @@ class SparseControlNet(ControlNetCLDM):
         x = torch.zeros_like(x)
         guided_hint = self.input_hint_block(hint, emb, context)
 
-        outs = []
+        out_output = []
+        out_middle = []
 
         hs = []
         if self.num_classes is not None:
@@ -100,12 +101,12 @@ class SparseControlNet(ControlNetCLDM):
                 guided_hint = None
             else:
                 h = module(h, emb, context)
-            outs.append(zero_conv(h, emb, context))
+            out_output.append(zero_conv(h, emb, context))
 
         h = self.middle_block(h, emb, context)
-        outs.append(self.middle_block_out(h, emb, context))
+        out_middle.append(self.middle_block_out(h, emb, context))
 
-        return outs
+        return {"middle": out_middle, "output": out_output}
 
 
 class SparseModelPatcher(ModelPatcher):
@@ -154,36 +155,10 @@ class SparseModelPatcher(ModelPatcher):
             self.object_patches_backup = n.object_patches_backup
 
 
-class PreprocSparseRGBWrapper:
-    error_msg = "Invalid use of RGB SparseCtrl output. The output of RGB SparseCtrl preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply ControlNet node (advanced or otherwise). It cannot be used for anything else that accepts IMAGE input."
+class PreprocSparseRGBWrapper(AbstractPreprocWrapper):
+    error_msg = error_msg = "Invalid use of RGB SparseCtrl output. The output of RGB SparseCtrl preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply ControlNet node (advanced or otherwise). It cannot be used for anything else that accepts IMAGE input."
     def __init__(self, condhint: Tensor):
-        self.condhint = condhint
-    
-    def movedim(self, *args, **kwargs):
-        return self
-
-    def __getattr__(self, *args, **kwargs):
-        raise AttributeError(self.error_msg)
-    
-    def __setattr__(self, name, value):
-        if name != "condhint":
-            raise AttributeError(self.error_msg)
-        super().__setattr__(name, value)
-    
-    def __iter__(self, *args, **kwargs):
-        raise AttributeError(self.error_msg)
-    
-    def __next__(self, *args, **kwargs):
-        raise AttributeError(self.error_msg)
-
-    def __len__(self, *args, **kwargs):
-        raise AttributeError(self.error_msg)
-    
-    def __getitem__(self, *args, **kwargs):
-        raise AttributeError(self.error_msg)
-    
-    def __setitem__(self, *args, **kwargs):
-        raise AttributeError(self.error_msg)
+        super().__init__(condhint)
 
 
 class SparseContextAware:
