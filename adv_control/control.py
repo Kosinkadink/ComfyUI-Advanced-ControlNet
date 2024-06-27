@@ -101,15 +101,14 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.t2iadapter())
 
     def control_merge_inject(self, control: dict[str, list[Tensor]], control_prev, output_dtype):
-        # if has uncond multiplier, need to make sure control shapes are the same batch size as expected
-        if self.weights.has_uncond_multiplier or self.weights.has_uncond_mask:
-            for key in control:
-                control_current = control[key]
-                for i in range(len(control_current)):
-                    x = control_current[i]
-                    if x is not None:
-                        if x.size(0) < self.batch_size:
-                            control_current[i] = x.repeat(self.batched_number, 1, 1, 1)[:self.batch_size]
+        # match batch_size
+        # TODO: make this more efficient by modifying the cached self.control_input val instead of doing this every step
+        for key in control:
+            control_current = control[key]
+            for i in range(len(control_current)):
+                x = control_current[i]
+                if x is not None and x.size(0) == 1 and x.size(0) != self.batch_size:
+                    control_current[i] = x.repeat(self.batch_size, 1, 1, 1)[:self.batch_size]
         return AdvancedControlBase.control_merge_inject(self, control, control_prev, output_dtype)
 
     def get_universal_weights(self) -> ControlWeights:
@@ -119,7 +118,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         raw_weights.reverse()  # need to reverse to match recent ComfyUI changes
         return self.weights.copy_with_new_weights(raw_weights)
 
-    def get_calc_pow(self, idx: int, layers: int) -> int:
+    def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
         # match how T2IAdapterAdvanced deals with universal weights
         indeces = [7 - i for i in range(8)]
         indeces = [indeces[-8], indeces[-3], indeces[-2], indeces[-1]]

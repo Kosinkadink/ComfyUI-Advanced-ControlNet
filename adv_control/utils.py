@@ -753,7 +753,11 @@ class AdvancedControlBase:
         return self.weights.get(idx=idx, control=control, key=key)
     
     def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
-        return (len(control[key])-1)-idx
+        c_len = len(control[key])-1
+        if key == "output":
+            if "middle" in control:
+                c_len += len(control["middle"])
+        return c_len-idx
 
     def calc_latent_keyframe_mults(self, x: Tensor, batched_number: int) -> Tensor:
         # apply strengths, and get batch indeces to null out
@@ -815,15 +819,14 @@ class AdvancedControlBase:
         if self.weights.has_uncond_mask:
             pass
 
-        x_len = x.size(0)  # mainly to account for how ComfyUI T2IAdapter works when only one condhint is provided
         if self.latent_keyframes is not None:
-            x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)[:x_len]
+            x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.mask_cond_hint, x.shape)[:x_len]
+            masks = prepare_mask_batch(self.mask_cond_hint, x.shape)
             x[:] = x[:] * masks
         if self.tk_mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)[:x_len]
+            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
         if self._current_timestep_keyframe.strength != 1.0:
