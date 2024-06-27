@@ -815,14 +815,15 @@ class AdvancedControlBase:
         if self.weights.has_uncond_mask:
             pass
 
+        x_len = x.size(0)  # mainly to account for how ComfyUI T2IAdapter works when only one condhint is provided
         if self.latent_keyframes is not None:
-            x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
+            x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)[:x_len]
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.mask_cond_hint, x.shape)
+            masks = prepare_mask_batch(self.mask_cond_hint, x.shape)[:x_len]
             x[:] = x[:] * masks
         if self.tk_mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)
+            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)[:x_len]
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
         if self._current_timestep_keyframe.strength != 1.0:
