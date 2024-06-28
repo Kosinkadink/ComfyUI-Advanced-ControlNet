@@ -4,8 +4,8 @@ from torch import Tensor
 import folder_paths
 from comfy.model_patcher import ModelPatcher
 
-from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet
-from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, BIGMAX
+from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
+from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper, BIGMAX
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
     SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
@@ -89,6 +89,7 @@ class AdvancedControlNetApply:
                 "latent_kf_override": ("LATENT_KEYFRAME", ),
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "model_optional": ("MODEL",),
+                "vae_optional": ("VAE",),
             }
         }
 
@@ -99,7 +100,7 @@ class AdvancedControlNetApply:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent,
-                         mask_optional: Tensor=None, model_optional: ModelPatcher=None,
+                         mask_optional: Tensor=None, model_optional: ModelPatcher=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None):
         if strength == 0:
@@ -121,7 +122,7 @@ class AdvancedControlNetApply:
                     c_net = cnets[prev_cnet]
                 else:
                     # copy, convert to advanced if needed, and set cond
-                    c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent))
+                    c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent), vae_optional)
                     if is_advanced_controlnet(c_net):
                         # disarm node check
                         c_net.disarm()
@@ -130,6 +131,17 @@ class AdvancedControlNetApply:
                             if not model_optional:
                                 raise Exception(f"Type '{type(c_net).__name__}' requires model_optional input, but got None.")
                             c_net.patch_model(model=model_optional)
+                        # if vae required, verify vae is passed in
+                        if c_net.require_vae:
+                            # if controlnet can accept preprocced condhint latents and is the case, ignore vae requirement
+                            if c_net.allow_condhint_latents and isinstance(control_hint, AbstractPreprocWrapper):
+                                pass
+                            elif not vae_optional:
+                                # make sure SD3 ControlNet will get a special message instead of generic type mention
+                                if is_sd3_advanced_controlnet:
+                                    raise Exception(f"SD3 ControlNet requires vae_optional input, but got None.")
+                                else:
+                                    raise Exception(f"Type '{type(c_net).__name__}' requires vae_optional input, but got None.")
                         # apply optional parameters and overrides, if provided
                         if timestep_kf is not None:
                             c_net.set_timestep_keyframes(timestep_kf)

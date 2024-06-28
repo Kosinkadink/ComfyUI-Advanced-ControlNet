@@ -14,6 +14,7 @@ import comfy.model_base
 
 from comfy.controlnet import ControlBase
 from comfy.model_patcher import ModelPatcher
+from comfy.sd import VAE
 
 from .logger import logger
 
@@ -166,12 +167,21 @@ class ControlWeights:
         self.has_uncond_mask = uncond_mask is not None
         self.extras = extras
 
-    def get(self, idx: int, default=1.0) -> Union[float, Tensor]:
+    def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
         # if weights is not none, return index
         if self.weights is not None:
-            # this implies weights list is not aligning with expectations - will need to adjust code
-            if idx >= len(self.weights):
-                return default
+            # if middle weight, need to pretend index is actually after all the output weights (if applicable)
+            if key == "middle" and "output" in control:
+                idx += len(control["output"])
+
+            if key == "output":
+                # this implies weights list is not aligning with expectations - will need to adjust code
+                if idx >= len(self.weights)-1:
+                    return default
+            else:
+                # this implies weights list is not aligning with expectations - will need to adjust code
+                if idx >= len(self.weights):
+                    return default
             return self.weights[idx]
         return 1.0
 
@@ -419,11 +429,15 @@ class manual_cast_clean_groupnorm(comfy.ops.manual_cast):
 
 
 # adapted from comfy/sample.py
-def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False):
+def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False, match_shape=False):
     mask = mask.clone()
-    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[2]*multiplier, shape[3]*multiplier), mode="bilinear")
+    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[-2]*multiplier, shape[-1]*multiplier), mode="bilinear")
     if match_dim1:
+        if match_shape and len(shape) < 4:
+            raise Exception(f"match_dim1 cannot be True if shape is under 4 dims; was {len(shape)}.")
         mask = torch.cat([mask] * shape[1], dim=1)
+    if match_shape and len(shape) == 3:
+        mask = mask.squeeze(1)
     return mask
 
 
@@ -531,7 +545,7 @@ class WeightTypeException(TypeError):
 
 
 class AdvancedControlBase:
-    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False):
+    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False, require_vae=False, allow_condhint_latents=False):
         self.base = base
         self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
         self.add_compatible_weight(weights_default.weight_type)
@@ -564,8 +578,13 @@ class AdvancedControlBase:
         self.pre_run = self.pre_run_inject
         self.cleanup = self.cleanup_inject
         self.set_previous_controlnet = self.set_previous_controlnet_inject
-        # require model to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
+        self.set_cond_hint = self.set_cond_hint_inject
+        # vae to store
+        self.adv_vae = None
+        # require model/vae to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
         self.require_model = require_model
+        self.require_vae = require_vae
+        self.allow_condhint_latents = allow_condhint_latents
         # disarm - when set to False, used to force usage of Apply Advanced ControlNet 🛂🅐🅒🅝 node (which will set it to True)
         self.disarmed = not require_model
     
@@ -668,6 +687,21 @@ class AdvancedControlBase:
         self.mask_cond_hint_original = mask_hint
         return self
 
+    def set_cond_hint_inject(self, *args, **kwargs):
+        to_return = self.base.set_cond_hint(*args, **kwargs)
+        # if vae required, look in args and kwargs for it
+        if self.require_vae:
+            # check args first, as that's the default way vae param is used in ComfyUI
+            for arg in args:
+                if isinstance(arg, VAE):
+                    self.adv_vae = arg
+                    break
+            # if not in args, check kwargs now
+            if self.adv_vae is None:
+                if 'vae' in kwargs:
+                    self.adv_vae = kwargs['vae']
+        return to_return
+
     def pre_run_inject(self, model, percent_to_timestep_function):
         self.base.pre_run(model, percent_to_timestep_function)
         self.pre_run_advanced(model, percent_to_timestep_function)
@@ -714,16 +748,20 @@ class AdvancedControlBase:
             control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
         return control_prev
 
-    def calc_weight(self, idx: int, x: Tensor, layers: int) -> Union[float, Tensor]:
+    def calc_weight(self, idx: int, x: Tensor, control: dict[str, list[Tensor]], key: str) -> Union[float, Tensor]:
         if self.weights.weight_mask is not None:
             # prepare weight mask
             self.prepare_weight_mask_cond_hint(x, self.batched_number)
             # adjust mask for current layer and return
-            return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, layers=layers))
-        return self.weights.get(idx=idx)
+            return torch.pow(self.weight_mask_cond_hint, self.get_calc_pow(idx=idx, control=control, key=key))
+        return self.weights.get(idx=idx, control=control, key=key)
     
-    def get_calc_pow(self, idx: int, layers: int) -> int:
-        return (layers-1)-idx
+    def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
+        c_len = len(control[key])-1
+        if key == "output":
+            if "middle" in control:
+                c_len += len(control["middle"])
+        return c_len-idx
 
     def calc_latent_keyframe_mults(self, x: Tensor, batched_number: int) -> Tensor:
         # apply strengths, and get batch indeces to null out
@@ -789,50 +827,37 @@ class AdvancedControlBase:
             x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.mask_cond_hint, x.shape)
+            masks = prepare_mask_batch(self.mask_cond_hint, x.shape, match_shape=True)
             x[:] = x[:] * masks
         if self.tk_mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)
+            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape, match_shape=True)
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
         if self._current_timestep_keyframe.strength != 1.0:
             x[:] *= self._current_timestep_keyframe.strength
     
-    def control_merge_inject(self: 'AdvancedControlBase', control_input, control_output, control_prev, output_dtype):
+    def control_merge_inject(self: 'AdvancedControlBase', control: dict[str, list[Tensor]], control_prev: dict, output_dtype):
         out = {'input':[], 'middle':[], 'output': []}
 
-        if control_input is not None:
-            for i in range(len(control_input)):
-                key = 'input'
-                x = control_input[i]
-                if x is not None:
-                    self.apply_advanced_strengths_and_masks(x, self.batched_number)
-
-                    x *= self.strength * self.calc_weight(i, x, len(control_input))
-                    if x.dtype != output_dtype:
-                        x = x.to(output_dtype)
-                out[key].insert(0, x)
-
-        if control_output is not None:
+        for key in control:
+            control_output = control[key]
+            applied_to = set()
             for i in range(len(control_output)):
-                if i == (len(control_output) - 1):
-                    key = 'middle'
-                    index = 0
-                else:
-                    key = 'output'
-                    index = i
                 x = control_output[i]
                 if x is not None:
-                    self.apply_advanced_strengths_and_masks(x, self.batched_number)
-
                     if self.global_average_pooling:
                         x = torch.mean(x, dim=(2, 3), keepdim=True).repeat(1, 1, x.shape[2], x.shape[3])
 
-                    x *= self.strength * self.calc_weight(i, x, len(control_output))
+                    if x not in applied_to: #memory saving strategy, allow shared tensors and only apply strength to shared tensors once
+                        applied_to.add(x)
+                        self.apply_advanced_strengths_and_masks(x, self.batched_number)
+                        x *= self.strength * self.calc_weight(i, x, control, key)
+
                     if x.dtype != output_dtype:
                         x = x.to(output_dtype)
 
                 out[key].append(x)
+
         if control_prev is not None:
             for x in ['input', 'middle', 'output']:
                 o = out[x]
@@ -847,7 +872,7 @@ class AdvancedControlBase:
                             if o[i].shape[0] < prev_val.shape[0]:
                                 o[i] = prev_val + o[i]
                             else:
-                                o[i] += prev_val
+                                o[i] = prev_val + o[i]  # TODO from base ComfyUI: change back to inplace add if shared tensors stop being an issue
         return out
 
     def prepare_mask_cond_hint(self, x_noisy: Tensor, t, cond, batched_number, dtype=None, direct_attn=False):
@@ -924,4 +949,7 @@ class AdvancedControlBase:
         copied.mask_cond_hint_original = self.mask_cond_hint_original
         copied.weights_override = self.weights_override
         copied.latent_keyframe_override = self.latent_keyframe_override
+        copied.adv_vae = self.adv_vae
+        copied.require_vae = self.require_vae
+        copied.allow_condhint_latents = self.allow_condhint_latents
         copied.disarmed = self.disarmed

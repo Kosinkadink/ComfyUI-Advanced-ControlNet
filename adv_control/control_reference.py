@@ -218,7 +218,7 @@ class ReferenceOptions:
 
 
 class ReferencePreprocWrapper(AbstractPreprocWrapper):
-    error_msg = error_msg = "Invalid use of Reference Preprocess output. The output of RGB SparseCtrl preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply Advanced ControlNet node. It cannot be used for anything else that accepts IMAGE input."
+    error_msg = error_msg = "Invalid use of Reference Preprocess output. The output of Reference preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply Advanced ControlNet node. It cannot be used for anything else that accepts IMAGE input."
     def __init__(self, condhint: Tensor):
         super().__init__(condhint)
 
@@ -228,10 +228,12 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, device=None):
         super().__init__(device)
-        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
+        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), allow_condhint_latents=True)
+        # TODO: allow vae_optional to be used instead of preprocessor
+        #require_vae=True
         self.ref_opts = ref_opts
         self.order = 0
-        self.latent_format = None
+        self.model_latent_format = None
         self.model_sampling_current = None
         self.should_apply_attn_effective_strength = False
         self.should_apply_adain_effective_strength = False
@@ -288,9 +290,9 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         AdvancedControlBase.pre_run_advanced(self, model, percent_to_timestep_function)
-        if type(self.cond_hint_original) == ReferencePreprocWrapper:
+        if isinstance(self.cond_hint_original, AbstractPreprocWrapper):
             self.cond_hint_original = self.cond_hint_original.condhint
-        self.latent_format = model.latent_format # LatentFormat object, used to process_in latent cond_hint
+        self.model_latent_format = model.latent_format # LatentFormat object, used to process_in latent cond_hint
         self.model_sampling_current = model.model_sampling
         # SDXL is more sensitive to style_fidelity according to sd-webui-controlnet comments
         if type(model).__name__ == "SDXL":
@@ -328,7 +330,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number, except_one=False)
         # noise cond_hint based on sigma (current step)
-        self.cond_hint = self.latent_format.process_in(self.cond_hint)
+        self.cond_hint = self.model_latent_format.process_in(self.cond_hint)
         self.cond_hint = ref_noise_latents(self.cond_hint, sigma=t, noise=None)
         timestep = self.model_sampling_current.timestep(t)
         self.should_apply_attn_effective_strength = not (math.isclose(self.strength, 1.0) and math.isclose(self._current_timestep_keyframe.strength, 1.0) and math.isclose(self.ref_opts.attn_strength, 1.0))
@@ -343,8 +345,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
 
     def cleanup_advanced(self):
         super().cleanup_advanced()
-        del self.latent_format
-        self.latent_format = None
+        del self.model_latent_format
+        self.model_latent_format = None
         del self.model_sampling_current
         self.model_sampling_current = None
         self.should_apply_attn_effective_strength = False
