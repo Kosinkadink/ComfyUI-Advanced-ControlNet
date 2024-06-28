@@ -429,11 +429,15 @@ class manual_cast_clean_groupnorm(comfy.ops.manual_cast):
 
 
 # adapted from comfy/sample.py
-def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False):
+def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False, match_shape=False):
     mask = mask.clone()
-    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[2]*multiplier, shape[3]*multiplier), mode="bilinear")
+    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[-2]*multiplier, shape[-1]*multiplier), mode="bilinear")
     if match_dim1:
+        if match_shape and len(shape) < 4:
+            raise Exception(f"match_dim1 cannot be True if shape is under 4 dims; was {len(shape)}.")
         mask = torch.cat([mask] * shape[1], dim=1)
+    if match_shape and len(shape) == 3:
+        mask = mask.squeeze(1)
     return mask
 
 
@@ -823,10 +827,10 @@ class AdvancedControlBase:
             x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.mask_cond_hint, x.shape)
+            masks = prepare_mask_batch(self.mask_cond_hint, x.shape, match_shape=True)
             x[:] = x[:] * masks
         if self.tk_mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape)
+            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape, match_shape=True)
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
         if self._current_timestep_keyframe.strength != 1.0:
