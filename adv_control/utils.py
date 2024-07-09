@@ -145,6 +145,7 @@ class ControlWeightType:
     UNIVERSAL = "universal"
     T2IADAPTER = "t2iadapter"
     CONTROLNET = "controlnet"
+    CONTROLNETPLUSPLUS = "controlnet++"
     CONTROLLORA = "controllora"
     CONTROLLLLITE = "controllllite"
     SVD_CONTROLNET = "svd_controlnet"
@@ -380,7 +381,7 @@ class TimestepKeyframeGroup:
 
 class AbstractPreprocWrapper:
     error_msg = "Invalid use of [InsertHere] output. The output of [InsertHere] preprocessor is NOT a usual image, but a latent pretending to be an image - you must connect the output directly to an Apply ControlNet node (advanced or otherwise). It cannot be used for anything else that accepts IMAGE input."
-    def __init__(self, condhint: Tensor):
+    def __init__(self, condhint):
         self.condhint = condhint
     
     def movedim(self, *args, **kwargs):

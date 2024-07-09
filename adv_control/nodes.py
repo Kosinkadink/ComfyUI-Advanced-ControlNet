@@ -12,6 +12,7 @@ from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolati
                               TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
 from .nodes_reference import ReferenceControlNetNode, ReferenceControlFinetune, ReferencePreprocessorNode
+from .nodes_plusplus import PlusPlusLoaderAdvanced, PlusPlusInputNode
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import LoadImagesFromDirectory
 from .logger import logger
@@ -199,6 +200,9 @@ NODE_CLASS_MAPPINGS = {
     "ACN_SparseCtrlIndexMethodNode": SparseIndexMethodNode,
     "ACN_SparseCtrlSpreadMethodNode": SparseSpreadMethodNode,
     "ACN_SparseCtrlWeightExtras": SparseWeightExtras,
+    # ControlNet++
+    "ACN_ControlNet++LoaderAdvanced": PlusPlusLoaderAdvanced,
+    "ACN_ControlNet++InputNode": PlusPlusInputNode,
     # Reference
     "ACN_ReferencePreprocessor": ReferencePreprocessorNode,
     "ACN_ReferenceControlNet": ReferenceControlNetNode,
@@ -238,6 +242,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ACN_SparseCtrlIndexMethodNode": "SparseCtrl Index Method 🛂🅐🅒🅝",
     "ACN_SparseCtrlSpreadMethodNode": "SparseCtrl Spread Method 🛂🅐🅒🅝",
     "ACN_SparseCtrlWeightExtras": "SparseCtrl Weight Extras 🛂🅐🅒🅝",
+    # ControlNet++
+    "ACN_ControlNet++LoaderAdvanced": "Load ControlNet++ Model 🛂🅐🅒🅝",
+    "ACN_ControlNet++InputNode": "ControlNet++ Input 🛂🅐🅒🅝",
     # Reference
     "ACN_ReferencePreprocessor": "Reference Preproccessor 🛂🅐🅒🅝",
     "ACN_ReferenceControlNet": "Reference ControlNet 🛂🅐🅒🅝",
