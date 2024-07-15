@@ -1,4 +1,5 @@
 from torch import Tensor
+import math
 
 import folder_paths
 
@@ -34,7 +35,7 @@ class PlusPlusLoaderSingle:
         return {
             "required": {
                 "name": (folder_paths.get_filename_list("controlnet"), ),
-                "control_type": (PlusPlusType._LIST,),
+                "control_type": (PlusPlusType._LIST_WITH_NONE,),
             }
         }
     
@@ -61,7 +62,7 @@ class PlusPlusInputNode:
             },
             "optional": {
                 "prev_plus_input": ("PLUS_INPUT",),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": BIGMAX, "step": 0.01}),
+                #"strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": BIGMAX, "step": 0.01}),
             }
         }
     
@@ -75,6 +76,8 @@ class PlusPlusInputNode:
             prev_plus_input = PlusPlusInputGroup()
         prev_plus_input = prev_plus_input.clone()
 
+        if math.isclose(strength, 0.0):
+            strength = 0.0000001
         pp_input = PlusPlusInput(image, control_type, strength)
         prev_plus_input.add(pp_input)
 
