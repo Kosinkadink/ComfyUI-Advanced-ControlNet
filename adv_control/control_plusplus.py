@@ -88,7 +88,7 @@ class PlusPlusImageWrapper(AbstractPreprocWrapper):
             pp_input.image = pp_input.image.movedim(source, destination)
         return PlusPlusImageWrapper(condhint)
 
-# parts taken from 
+# parts taken from comfy/cldm/cldm.py
 class OptimizedAttention(nn.Module):
     def __init__(self, c, nhead, dropout=0.0, dtype=None, device=None, operations=None):
         super().__init__()
