@@ -519,6 +519,11 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
 
 def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, model=None):
     controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+    # from pathlib import Path
+    # log_name = ckpt_path.split('\\')[-1]
+    # with open(Path(__file__).parent.parent.parent / rf"keys_{log_name}.txt", "w") as afile:
+    #     for key, value in controlnet_data.items():
+    #         afile.write(f"{key}:\t{value.shape}\n")
     control = None
     # check if a non-vanilla ControlNet
     controlnet_type = ControlWeightType.DEFAULT
@@ -538,6 +543,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
         # SVD-ControlNet check
         elif "temporal_res_block" in key:
             has_temporal_res_block_key = True
+        # ControlNet++ check
+        elif "task_embedding" in key:
+            raise Exception("ControlNet++ model detected; must be loaded using the Load ControlNet++ Model nodes.")
+
     if has_controlnet_key and has_motion_modules_key:
         controlnet_type = ControlWeightType.SPARSECTRL
     elif has_controlnet_key and has_temporal_res_block_key:
