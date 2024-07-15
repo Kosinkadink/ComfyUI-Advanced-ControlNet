@@ -132,10 +132,8 @@ class ControlAddEmbeddingAdv(nn.Module):
         self.in_dim = in_dim
         self.linear_1 = operations.Linear(in_dim * num_control_type, out_dim, dtype=dtype, device=device)
         self.linear_2 = operations.Linear(out_dim, out_dim, dtype=dtype, device=device)
+
     def forward(self, control_type, dtype, device):
-        #c_type = torch.zeros((self.num_control_type,), device=device)
-        #c_type[control_type] = 1.0
-        #c_type = timestep_embedding(c_type.flatten(), self.in_dim, repeat_only=False).to(dtype).reshape((-1, self.num_control_type * self.in_dim))
         c_type = timestep_embedding(control_type.flatten(), self.in_dim, repeat_only=False).to(dtype).reshape((-1, self.num_control_type * self.in_dim))
         return self.linear_2(torch.nn.functional.silu(self.linear_1(c_type)))
 
@@ -158,25 +156,14 @@ class ControlNetPlusPlus(ControlNetCLDM):
         inputs = []
         condition_list = []
 
-        #for idx in range(min(1, indexes.shape[0] + 1)):
         for idx in range(indexes.shape[0]):
             controlnet_cond = self.input_hint_block(hint[indexes[idx][0]], emb, context)
             feat_seq = torch.mean(controlnet_cond, dim=(2, 3))
-            #if idx < len(control_type):
             if idx < indexes.shape[0]:
                 feat_seq += self.task_embedding[indexes[idx][0]]
 
             inputs.append(feat_seq.unsqueeze(1))
             condition_list.append(controlnet_cond)
-
-        # for idx in range(min(1, len(control_type))):
-        #     controlnet_cond = self.input_hint_block(hint[idx], emb, context)
-        #     feat_seq = torch.mean(controlnet_cond, dim=(2, 3))
-        #     if idx < len(control_type):
-        #         feat_seq += self.task_embedding[control_type[idx]]
-
-        #     inputs.append(feat_seq.unsqueeze(1))
-        #     condition_list.append(controlnet_cond)
 
         x = torch.cat(inputs, dim=1)
         x = self.transformer_layes(x)
@@ -201,9 +188,6 @@ class ControlNetPlusPlus(ControlNetCLDM):
             control_type = kwargs.get("control_type", [])
 
             emb += self.control_add_embedding(control_type, emb.dtype, emb.device)
-            #if len(control_type) > 0:
-                # if len(hint.shape) < 5:
-                #     hint = hint.unsqueeze(dim=0)
             guided_hint = self.union_controlnet_merge(hint, control_type, emb, context)
 
         if guided_hint is None:
@@ -340,8 +324,6 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
             pp_input = PlusPlusInput(self.cond_hint_original, self.single_control_type, 1.0)
             pp_group.add(pp_input)
             self.cond_hint_original = pp_group
-        # for pp_input in self.cond_hint_original.controls.values():
-        #     pp_input.image = pp_input.image * 2.0 - 1.0
         return to_return
 
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number):
@@ -428,31 +410,6 @@ def load_controlnetplusplus(ckpt_path: str, timestep_keyframe: TimestepKeyframeG
         diffusers_keys = comfy.utils.unet_to_diffusers(controlnet_config)
         diffusers_keys["controlnet_mid_block.weight"] = "middle_block_out.0.weight"
         diffusers_keys["controlnet_mid_block.bias"] = "middle_block_out.0.bias"
-
-        # # unique ControlNet++ keys ---------------------------------------------------
-        # diffusers_keys["task_embedding"] = "task_embedding"
-
-        # diffusers_keys["spatial_ch_projs.bias"] = "spatial_ch_projs.bias"
-        # diffusers_keys["spatial_ch_projs.weight"] = "spatial_ch_projs.weight"
-
-        # diffusers_keys["control_add_embedding.linear_1.bias"] = "control_add_embedding.0.bias"
-        # diffusers_keys["control_add_embedding.linear_1.weight"] = "control_add_embedding.0.weight"
-        # diffusers_keys["control_add_embedding.linear_2.bias"] = "control_add_embedding.2.bias"
-        # diffusers_keys["control_add_embedding.linear_2.weight"] = "control_add_embedding.2.weight"
-
-        # diffusers_keys["transformer_layes.0.attn.in_proj_bias"] = "transformer_layes.0.attn.in_proj.bias"
-        # diffusers_keys["transformer_layes.0.attn.in_proj_weight"] = "transformer_layes.0.attn.in_proj.weight"
-        # diffusers_keys["transformer_layes.0.attn.out_proj.bias"] = "transformer_layes.0.attn.out_proj.bias"
-        # diffusers_keys["transformer_layes.0.attn.out_proj.weight"] = "transformer_layes.0.attn.out_proj.weight"
-        # diffusers_keys["transformer_layes.0.ln_1.bias"] = "transformer_layes.0.ln_1.bias"
-        # diffusers_keys["transformer_layes.0.ln_1.weight"] = "transformer_layes.0.ln_1.weight"
-        # diffusers_keys["transformer_layes.0.ln_2.bias"] = "transformer_layes.0.ln_2.bias"
-        # diffusers_keys["transformer_layes.0.ln_2.weight"] = "transformer_layes.0.ln_2.weight"
-        # diffusers_keys["transformer_layes.0.mlp.c_fc.bias"] = "transformer_layes.0.mlp.c_fc.bias"
-        # diffusers_keys["transformer_layes.0.mlp.c_fc.weight"] = "transformer_layes.0.mlp.c_fc.weight"
-        # diffusers_keys["transformer_layes.0.mlp.c_proj.bias"] = "transformer_layes.0.mlp.c_proj.bias"
-        # diffusers_keys["transformer_layes.0.mlp.c_proj.weight"] = "transformer_layes.0.mlp.c_proj.weight"
-        # #-----------------------------------------------------------------------------
 
         count = 0
         loop = True
