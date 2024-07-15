@@ -34,8 +34,10 @@ class PlusPlusType:
     THINLINE = "canny/lineart/mlsd"
     NORMAL = "normal"
     SEGMENT = "segment"
-    _LIST = [OPENPOSE, DEPTH, THICKLINE, THINLINE, NORMAL, SEGMENT]
-    _DICT = {OPENPOSE: 0, DEPTH: 1, THICKLINE: 2, THINLINE: 3, NORMAL: 4, SEGMENT: 5}
+    TILE = "tile"
+    REPAINT = "inpaint/outpaint"
+    _LIST = [OPENPOSE, DEPTH, THICKLINE, THINLINE, NORMAL, SEGMENT, TILE, REPAINT]
+    _DICT = {OPENPOSE: 0, DEPTH: 1, THICKLINE: 2, THINLINE: 3, NORMAL: 4, SEGMENT: 5, TILE: 6, REPAINT: 7}
 
     @classmethod
     def to_idx(cls, control_type: str):
@@ -304,18 +306,40 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
         self.cond_hint: list[Union[Tensor, None]]
         self.cond_hint_shape: Tensor = None
         self.cond_hint_types: Tensor = None
+        # in case it is using the single loader
+        self.single_control_type: str = None
 
     def get_universal_weights(self) -> ControlWeights:
         # TODO: match actual layer count of model
         raw_weights = [(self.weights.base_multiplier ** float(12 - i)) for i in range(13)]
         return self.weights.copy_with_new_weights(raw_weights)
 
+    def verify_control_type(self, model_name: str, pp_group: PlusPlusInputGroup=None):
+        if pp_group is not None:
+            for pp_input in pp_group.controls.values():
+                if PlusPlusType.to_idx(pp_input.control_type) >= self.control_model.num_control_type:
+                    raise Exception(f"ControlNet++ model '{model_name}' does not support control_type '{pp_input.control_type}'.")
+        if self.single_control_type is not None:
+            if PlusPlusType.to_idx(self.single_control_type) >= self.control_model.num_control_type:
+                raise Exception(f"ControlNet++ model '{model_name}' does not support control_type '{self.single_control_type}'.")
+
     def set_cond_hint_inject(self, *args, **kwargs):
         to_return = super().set_cond_hint_inject(*args, **kwargs)
-        # check that cond_hint is wrapped, and unwrap it
-        if type(self.cond_hint_original) != PlusPlusImageWrapper:
-            raise Exception("ControlNet++ expects image input from the Load ControlNet++ Model node, NOT from anything else. Images are provided to that node via ControlNet++ Input nodes.")
-        self.cond_hint_original = self.cond_hint_original.condhint.clone()
+        # if not single_control_type, expect PlusPlusImageWrapper
+        if self.single_control_type is None:
+            # check that cond_hint is wrapped, and unwrap it
+            if type(self.cond_hint_original) != PlusPlusImageWrapper:
+                raise Exception("ControlNet++ (Multi) expects image input from the Load ControlNet++ Model node, NOT from anything else. Images are provided to that node via ControlNet++ Input nodes.")
+            self.cond_hint_original = self.cond_hint_original.condhint.clone()
+        # otherwise, expect single image input (AKA, usual controlnet input)
+        else:
+            # check that cond_hint is not a PlusPlusImageWrapper
+            if type(self.cond_hint_original) == PlusPlusImageWrapper:
+                raise Exception("ControlNet++ (Single) expects usual image input, NOT the image input from a Load ControlNet++ Model (Multi) node.")
+            pp_group = PlusPlusInputGroup()
+            pp_input = PlusPlusInput(self.cond_hint_original, self.single_control_type, 1.0)
+            pp_group.add(pp_input)
+            self.cond_hint_original = pp_group
         # for pp_input in self.cond_hint_original.controls.values():
         #     pp_input.image = pp_input.image * 2.0 - 1.0
         return to_return
@@ -343,8 +367,8 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
         if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * self.compression_ratio != self.cond_hint_shape[2] or x_noisy.shape[3] * self.compression_ratio != self.cond_hint_shape[3]:
             if self.cond_hint is not None:
                 del self.cond_hint
-            self.cond_hint = [None] * 6
-            self.cond_hint_types = torch.tensor([0.0] * 6)
+            self.cond_hint = [None] * self.control_model.num_control_type
+            self.cond_hint_types = torch.tensor([0.0] * self.control_model.num_control_type)
             self.cond_hint_shape = None
             compression_ratio = self.compression_ratio
             # unlike normal controlnet, need to handle each input image tensor (for each type)
@@ -386,6 +410,7 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
         c = ControlNetPlusPlusAdvanced(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
         self.copy_to(c)
         self.copy_to_advanced(c)
+        c.single_control_type = self.single_control_type
         return c
 
 
@@ -464,7 +489,7 @@ def load_controlnetplusplus(ckpt_path: str, timestep_keyframe: TimestepKeyframeG
                 new_sd[diffusers_keys[k]] = controlnet_data.pop(k)
         
         if "control_add_embedding.linear_1.bias" in controlnet_data: #Union Controlnet
-            controlnet_config["union_controlnet"] = True
+            controlnet_config["union_controlnet_num_control_type"] = controlnet_data["task_embedding"].shape[0]
             for k in list(controlnet_data.keys()):
                 new_k = k.replace('.attn.in_proj_', '.attn.in_proj.')
                 new_sd[new_k] = controlnet_data.pop(k)

@@ -24,7 +24,31 @@ class PlusPlusLoaderAdvanced:
     def load_controlnet_plusplus(self, plus_input: PlusPlusInputGroup, name: str):
         controlnet_path = folder_paths.get_full_path("controlnet", name)
         controlnet = load_controlnetplusplus(controlnet_path)
+        controlnet.verify_control_type(name, plus_input)
         return (controlnet, PlusPlusImageWrapper(plus_input),)
+
+
+class PlusPlusLoaderSingle:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "name": (folder_paths.get_filename_list("controlnet"), ),
+                "control_type": (PlusPlusType._LIST,),
+            }
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET",)
+    FUNCTION = "load_controlnet_plusplus"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/ControlNet++"
+
+    def load_controlnet_plusplus(self, name: str, control_type: str):
+        controlnet_path = folder_paths.get_full_path("controlnet", name)
+        controlnet = load_controlnetplusplus(controlnet_path)
+        controlnet.single_control_type = control_type
+        controlnet.verify_control_type(name)
+        return (controlnet,)
 
 
 class PlusPlusInputNode:
