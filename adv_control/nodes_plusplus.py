@@ -35,7 +35,7 @@ class PlusPlusLoaderSingle:
         return {
             "required": {
                 "name": (folder_paths.get_filename_list("controlnet"), ),
-                "control_type": (PlusPlusType._LIST_WITH_NONE,),
+                "control_type": (PlusPlusType._LIST_WITH_NONE, {"default": PlusPlusType.NONE}, ),
             }
         }
     
