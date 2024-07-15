@@ -7,6 +7,7 @@ import torch
 import torch as th
 import torch.nn as nn
 from torch import Tensor
+from collections import OrderedDict
 
 
 from comfy.ldm.modules.diffusionmodules.util import (zero_module, timestep_embedding)
@@ -14,7 +15,8 @@ from comfy.ldm.modules.diffusionmodules.util import (zero_module, timestep_embed
 from comfy.cldm.cldm import ControlNet as ControlNetCLDM
 import comfy.cldm.cldm
 from comfy.controlnet import ControlNet
-from comfy.t2i_adapter.adapter import ResidualAttentionBlock
+#from comfy.t2i_adapter.adapter import ResidualAttentionBlock
+from comfy.ldm.modules.attention import optimized_attention
 import comfy.ops
 import comfy.model_management
 import comfy.model_detection
@@ -82,50 +84,158 @@ class PlusPlusImageWrapper(AbstractPreprocWrapper):
             pp_input.image = pp_input.image.movedim(source, destination)
         return PlusPlusImageWrapper(condhint)
 
+# parts taken from 
+class OptimizedAttention(nn.Module):
+    def __init__(self, c, nhead, dropout=0.0, dtype=None, device=None, operations=None):
+        super().__init__()
+        self.heads = nhead
+        self.c = c
+
+        self.in_proj = operations.Linear(c, c * 3, bias=True, dtype=dtype, device=device)
+        self.out_proj = operations.Linear(c, c, bias=True, dtype=dtype, device=device)
+
+    def forward(self, x):
+        x = self.in_proj(x)
+        q, k, v = x.split(self.c, dim=2)
+        out = optimized_attention(q, k, v, self.heads)
+        return self.out_proj(out)
+
+class QuickGELU(nn.Module):
+    def forward(self, x: torch.Tensor):
+        return x * torch.sigmoid(1.702 * x)
+
+class ResBlockUnionControlnet(nn.Module):
+    def __init__(self, dim, nhead, dtype=None, device=None, operations=None):
+        super().__init__()
+        self.attn = OptimizedAttention(dim, nhead, dtype=dtype, device=device, operations=operations)
+        self.ln_1 = operations.LayerNorm(dim, dtype=dtype, device=device)
+        self.mlp = nn.Sequential(
+            OrderedDict([("c_fc", operations.Linear(dim, dim * 4, dtype=dtype, device=device)), ("gelu", QuickGELU()),
+                         ("c_proj", operations.Linear(dim * 4, dim, dtype=dtype, device=device))]))
+        self.ln_2 = operations.LayerNorm(dim, dtype=dtype, device=device)
+
+    def attention(self, x: torch.Tensor):
+        return self.attn(x)
+
+    def forward(self, x: torch.Tensor):
+        x = x + self.attention(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+        return x
+
+
+class ControlAddEmbeddingAdv(nn.Module):
+    def __init__(self, in_dim, out_dim, num_control_type, dtype=None, device=None, operations: comfy.ops.disable_weight_init=None):
+        super().__init__()
+        self.num_control_type = num_control_type
+        self.in_dim = in_dim
+        self.linear_1 = operations.Linear(in_dim * num_control_type, out_dim, dtype=dtype, device=device)
+        self.linear_2 = operations.Linear(out_dim, out_dim, dtype=dtype, device=device)
+    def forward(self, control_type, dtype, device):
+        #c_type = torch.zeros((self.num_control_type,), device=device)
+        #c_type[control_type] = 1.0
+        #c_type = timestep_embedding(c_type.flatten(), self.in_dim, repeat_only=False).to(dtype).reshape((-1, self.num_control_type * self.in_dim))
+        c_type = timestep_embedding(control_type.flatten(), self.in_dim, repeat_only=False).to(dtype).reshape((-1, self.num_control_type * self.in_dim))
+        return self.linear_2(torch.nn.functional.silu(self.linear_1(c_type)))
+
 
 class ControlNetPlusPlus(ControlNetCLDM):
     def __init__(self, *args,**kwargs):
         super().__init__(*args, **kwargs)
-        hint_channels = kwargs.get("hint_channels")
+
         operations: comfy.ops.disable_weight_init = kwargs.get("operations", comfy.ops.disable_weight_init)
         device = kwargs.get("device", None)
-        
+
         time_embed_dim = self.model_channels * 4
-        self.addition_time_embed_dim = 256
-        
-        # NOTE: the 'transformer_layes' typo is intentional, as it matches the original diffusers impl
-        # and the model keys
+        control_add_embed_dim = 256
 
-        # Copyright by Qi Xin(2024/07/06)
-        # Condition Transformer(fuse single/multi conditions with input image) 
-        # The Condition Transformer augment the feature representation of conditions
-        # The overall design is somewhat like resnet. The output of Condition Transformer is used to predict a condition bias adding to the original condition feature.
-        num_control_type = 6
-        num_trans_channel = 320
-        num_trans_head = 8
-        num_trans_layer = 1
-        num_proj_channel = 320
-        task_scale_factor = num_trans_channel ** 0.5
+        self.control_add_embedding = ControlAddEmbeddingAdv(control_add_embed_dim, time_embed_dim, self.num_control_type, dtype=self.dtype, device=device, operations=operations)
 
-        self.task_embedding = nn.Parameter(task_scale_factor * torch.randn(num_control_type, num_trans_channel))
-        self.transformer_layes = nn.Sequential(*[ResidualAttentionBlock(num_trans_channel, num_trans_head) for _ in range(num_trans_layer)])
-        self.spatial_ch_projs = zero_module(operations.Linear(num_trans_channel, num_proj_channel))
+    def union_controlnet_merge(self, hint: list[Tensor], control_type, emb, context):
+        # Equivalent to: https://github.com/xinsir6/ControlNetPlus/tree/main
+        indexes = torch.nonzero(control_type[0])
+        inputs = []
+        condition_list = []
 
-        # Control Encoder to distinguish different control conditions
-        # A simple but effective module, consists of an embedding layer and a linear layer, to inject the control info to time embedding.
-        #self.control_type_proj = Timesteps(self.addition_time_embed_dim, flip_sin_to_cos, freq_shift)
-        self.control_add_embedding = nn.Sequential(
-            operations.Linear(self.addition_time_embed_dim * 6, time_embed_dim, dtype=self.dtype, device=device),
-            nn.SiLU(),
-            operations.Linear(time_embed_dim, time_embed_dim, dtype=self.dtype, device=device),
-        )
+        #for idx in range(min(1, indexes.shape[0] + 1)):
+        for idx in range(indexes.shape[0]):
+            controlnet_cond = self.input_hint_block(hint[indexes[idx][0]], emb, context)
+            feat_seq = torch.mean(controlnet_cond, dim=(2, 3))
+            #if idx < len(control_type):
+            if idx < indexes.shape[0]:
+                feat_seq += self.task_embedding[indexes[idx][0]]
 
-    def forward(self, x: Tensor, hint: Tensor, timesteps, context, control_type: Tensor, y: Tensor=None, **kwargs):
+            inputs.append(feat_seq.unsqueeze(1))
+            condition_list.append(controlnet_cond)
+
+        # for idx in range(min(1, len(control_type))):
+        #     controlnet_cond = self.input_hint_block(hint[idx], emb, context)
+        #     feat_seq = torch.mean(controlnet_cond, dim=(2, 3))
+        #     if idx < len(control_type):
+        #         feat_seq += self.task_embedding[control_type[idx]]
+
+        #     inputs.append(feat_seq.unsqueeze(1))
+        #     condition_list.append(controlnet_cond)
+
+        x = torch.cat(inputs, dim=1)
+        x = self.transformer_layes(x)
+
+        controlnet_cond_fuser = None
+        for idx in range(indexes.shape[0]):
+            alpha = self.spatial_ch_projs(x[:, idx])
+            alpha = alpha.unsqueeze(-1).unsqueeze(-1)
+            o = condition_list[idx] + alpha
+            if controlnet_cond_fuser is None:
+                controlnet_cond_fuser = o
+            else:
+                controlnet_cond_fuser += o
+        return controlnet_cond_fuser
+
+    def forward(self, x: Tensor, hint: list[Tensor], timesteps, context, y: Tensor=None, **kwargs):
+        t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
+        emb = self.time_embed(t_emb)
+
+        guided_hint = None
+        if self.control_add_embedding is not None:
+            control_type = kwargs.get("control_type", [])
+
+            emb += self.control_add_embedding(control_type, emb.dtype, emb.device)
+            #if len(control_type) > 0:
+                # if len(hint.shape) < 5:
+                #     hint = hint.unsqueeze(dim=0)
+            guided_hint = self.union_controlnet_merge(hint, control_type, emb, context)
+
+        if guided_hint is None:
+            guided_hint = self.input_hint_block(hint, emb, context)
+
+        out_output = []
+        out_middle = []
+
+        hs = []
+        if self.num_classes is not None:
+            assert y.shape[0] == x.shape[0]
+            emb = emb + self.label_emb(y)
+
+        h = x
+        for module, zero_conv in zip(self.input_blocks, self.zero_convs):
+            if guided_hint is not None:
+                h = module(h, emb, context)
+                h += guided_hint
+                guided_hint = None
+            else:
+                h = module(h, emb, context)
+            out_output.append(zero_conv(h, emb, context))
+
+        h = self.middle_block(h, emb, context)
+        out_middle.append(self.middle_block_out(h, emb, context))
+
+        return {"middle": out_middle, "output": out_output}
+
+    def forward_bad(self, x: Tensor, hint: Tensor, timesteps, context, control_type: Tensor, y: Tensor=None, **kwargs):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
         emb = self.time_embed(t_emb)
 
         # inject control type info to time embedding to distinguish different control conditions
-        control_embeds = timestep_embedding(control_type.flatten(), self.addition_time_embed_dim, repeat_only=False).reshape((t_emb.shape[0], -1)).to(t_emb.dtype)
+        control_embeds = timestep_embedding(control_type.flatten(), self.control_add_embed_dim, repeat_only=False).reshape((t_emb.shape[0], -1)).to(t_emb.dtype)
         control_emb = self.control_add_embedding(control_embeds)
         emb = emb + control_emb
 
@@ -269,7 +379,7 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
 
-        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), control_type=self.cond_hint_types, y=y)
+        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y, control_type=self.cond_hint_types)
         return self.control_merge(control, control_prev, output_dtype)
 
     def copy(self):
@@ -294,30 +404,30 @@ def load_controlnetplusplus(ckpt_path: str, timestep_keyframe: TimestepKeyframeG
         diffusers_keys["controlnet_mid_block.weight"] = "middle_block_out.0.weight"
         diffusers_keys["controlnet_mid_block.bias"] = "middle_block_out.0.bias"
 
-        # unique ControlNet++ keys ---------------------------------------------------
-        diffusers_keys["task_embedding"] = "task_embedding"
+        # # unique ControlNet++ keys ---------------------------------------------------
+        # diffusers_keys["task_embedding"] = "task_embedding"
 
-        diffusers_keys["spatial_ch_projs.bias"] = "spatial_ch_projs.bias"
-        diffusers_keys["spatial_ch_projs.weight"] = "spatial_ch_projs.weight"
+        # diffusers_keys["spatial_ch_projs.bias"] = "spatial_ch_projs.bias"
+        # diffusers_keys["spatial_ch_projs.weight"] = "spatial_ch_projs.weight"
 
-        diffusers_keys["control_add_embedding.linear_1.bias"] = "control_add_embedding.0.bias"
-        diffusers_keys["control_add_embedding.linear_1.weight"] = "control_add_embedding.0.weight"
-        diffusers_keys["control_add_embedding.linear_2.bias"] = "control_add_embedding.2.bias"
-        diffusers_keys["control_add_embedding.linear_2.weight"] = "control_add_embedding.2.weight"
+        # diffusers_keys["control_add_embedding.linear_1.bias"] = "control_add_embedding.0.bias"
+        # diffusers_keys["control_add_embedding.linear_1.weight"] = "control_add_embedding.0.weight"
+        # diffusers_keys["control_add_embedding.linear_2.bias"] = "control_add_embedding.2.bias"
+        # diffusers_keys["control_add_embedding.linear_2.weight"] = "control_add_embedding.2.weight"
 
-        diffusers_keys["transformer_layes.0.attn.in_proj_bias"] = "transformer_layes.0.attn.in_proj_bias"
-        diffusers_keys["transformer_layes.0.attn.in_proj_weight"] = "transformer_layes.0.attn.in_proj_weight"
-        diffusers_keys["transformer_layes.0.attn.out_proj.bias"] = "transformer_layes.0.attn.out_proj.bias"
-        diffusers_keys["transformer_layes.0.attn.out_proj.weight"] = "transformer_layes.0.attn.out_proj.weight"
-        diffusers_keys["transformer_layes.0.ln_1.bias"] = "transformer_layes.0.ln_1.bias"
-        diffusers_keys["transformer_layes.0.ln_1.weight"] = "transformer_layes.0.ln_1.weight"
-        diffusers_keys["transformer_layes.0.ln_2.bias"] = "transformer_layes.0.ln_2.bias"
-        diffusers_keys["transformer_layes.0.ln_2.weight"] = "transformer_layes.0.ln_2.weight"
-        diffusers_keys["transformer_layes.0.mlp.c_fc.bias"] = "transformer_layes.0.mlp.c_fc.bias"
-        diffusers_keys["transformer_layes.0.mlp.c_fc.weight"] = "transformer_layes.0.mlp.c_fc.weight"
-        diffusers_keys["transformer_layes.0.mlp.c_proj.bias"] = "transformer_layes.0.mlp.c_proj.bias"
-        diffusers_keys["transformer_layes.0.mlp.c_proj.weight"] = "transformer_layes.0.mlp.c_proj.weight"
-        #-----------------------------------------------------------------------------
+        # diffusers_keys["transformer_layes.0.attn.in_proj_bias"] = "transformer_layes.0.attn.in_proj.bias"
+        # diffusers_keys["transformer_layes.0.attn.in_proj_weight"] = "transformer_layes.0.attn.in_proj.weight"
+        # diffusers_keys["transformer_layes.0.attn.out_proj.bias"] = "transformer_layes.0.attn.out_proj.bias"
+        # diffusers_keys["transformer_layes.0.attn.out_proj.weight"] = "transformer_layes.0.attn.out_proj.weight"
+        # diffusers_keys["transformer_layes.0.ln_1.bias"] = "transformer_layes.0.ln_1.bias"
+        # diffusers_keys["transformer_layes.0.ln_1.weight"] = "transformer_layes.0.ln_1.weight"
+        # diffusers_keys["transformer_layes.0.ln_2.bias"] = "transformer_layes.0.ln_2.bias"
+        # diffusers_keys["transformer_layes.0.ln_2.weight"] = "transformer_layes.0.ln_2.weight"
+        # diffusers_keys["transformer_layes.0.mlp.c_fc.bias"] = "transformer_layes.0.mlp.c_fc.bias"
+        # diffusers_keys["transformer_layes.0.mlp.c_fc.weight"] = "transformer_layes.0.mlp.c_fc.weight"
+        # diffusers_keys["transformer_layes.0.mlp.c_proj.bias"] = "transformer_layes.0.mlp.c_proj.bias"
+        # diffusers_keys["transformer_layes.0.mlp.c_proj.weight"] = "transformer_layes.0.mlp.c_proj.weight"
+        # #-----------------------------------------------------------------------------
 
         count = 0
         loop = True
@@ -352,6 +462,12 @@ def load_controlnetplusplus(ckpt_path: str, timestep_keyframe: TimestepKeyframeG
         for k in diffusers_keys:
             if k in controlnet_data:
                 new_sd[diffusers_keys[k]] = controlnet_data.pop(k)
+        
+        if "control_add_embedding.linear_1.bias" in controlnet_data: #Union Controlnet
+            controlnet_config["union_controlnet"] = True
+            for k in list(controlnet_data.keys()):
+                new_k = k.replace('.attn.in_proj_', '.attn.in_proj.')
+                new_sd[new_k] = controlnet_data.pop(k)
 
         leftover_keys = controlnet_data.keys()
         if len(leftover_keys) > 0:
