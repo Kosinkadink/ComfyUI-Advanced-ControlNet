@@ -25,6 +25,7 @@ class TimestepKeyframeNode:
                 "inherit_missing": ("BOOLEAN", {"default": True}, ),
                 "guarantee_steps": ("INT", {"default": 1, "min": 0, "max": BIGMAX}),
                 "mask_optional": ("MASK", ),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -81,6 +82,7 @@ class TimestepKeyframeInterpolationNode:
                 "inherit_missing": ("BOOLEAN", {"default": True},),
                 "mask_optional": ("MASK", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 70}),
             }
         }
     
@@ -139,6 +141,7 @@ class TimestepKeyframeFromStrengthListNode:
                 "inherit_missing": ("BOOLEAN", {"default": True},),
                 "mask_optional": ("MASK", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -195,6 +198,7 @@ class LatentKeyframeNode:
             },
             "optional": {
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
 
@@ -230,7 +234,8 @@ class LatentKeyframeGroupNode:
             "optional": {
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
                 "latent_optional": ("LATENT", ),
-                "print_keyframes": ("BOOLEAN", {"default": False})
+                "print_keyframes": ("BOOLEAN", {"default": False}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 35}),
             }
         }
     
@@ -349,7 +354,8 @@ class LatentKeyframeInterpolationNode:
             },
             "optional": {
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
-                "print_keyframes": ("BOOLEAN", {"default": False})
+                "print_keyframes": ("BOOLEAN", {"default": False}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 90}),
             }
         }
 
@@ -419,7 +425,8 @@ class LatentKeyframeBatchedGroupNode:
             },
             "optional": {
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
-                "print_keyframes": ("BOOLEAN", {"default": False})
+                "print_keyframes": ("BOOLEAN", {"default": False}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
 

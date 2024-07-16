@@ -13,6 +13,7 @@ class DefaultWeights:
         return {
             "optional": {
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -41,6 +42,7 @@ class ScaledSoftMaskedUniversalWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 75}),
             }
         }
     
@@ -75,6 +77,7 @@ class ScaledSoftUniversalWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 20}),
             }
         }
     
@@ -112,6 +115,7 @@ class SoftControlNetWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 50}),
             }
         }
     
@@ -153,6 +157,7 @@ class CustomControlNetWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 65}),
             }
         }
     
@@ -185,6 +190,7 @@ class SoftT2IAdapterWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 55}),
             }
         }
     
@@ -217,6 +223,7 @@ class CustomT2IAdapterWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 65}),
             }
         }
     
