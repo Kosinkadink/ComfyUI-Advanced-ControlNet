@@ -26,7 +26,7 @@ class ControlNetLoaderAdvanced:
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), ),
             },
             "optional": {
-                "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
+                "tk_optional": ("TIMESTEP_KEYFRAME", ),
             }
         }
 
@@ -36,10 +36,13 @@ class ControlNetLoaderAdvanced:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def load_controlnet(self, control_net_name,
-                        timestep_keyframe: TimestepKeyframeGroup=None
+                        tk_optional: TimestepKeyframeGroup=None,
+                        timestep_keyframe: TimestepKeyframeGroup=None,
                         ):
+        if timestep_keyframe is not None: # backwards compatibility
+            tk_optional = timestep_keyframe
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
-        controlnet = load_controlnet(controlnet_path, timestep_keyframe)
+        controlnet = load_controlnet(controlnet_path, tk_optional)
         return (controlnet,)
     
 
@@ -52,7 +55,8 @@ class DiffControlNetLoaderAdvanced:
                 "control_net_name": (folder_paths.get_filename_list("controlnet"), )
             },
             "optional": {
-                "timestep_keyframe": ("TIMESTEP_KEYFRAME", ),
+                "tk_optional": ("TIMESTEP_KEYFRAME", ),
+                "autosize": ("ACNAUTOSIZE", {"padding": 160}),
             }
         }
     
@@ -62,10 +66,13 @@ class DiffControlNetLoaderAdvanced:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def load_controlnet(self, control_net_name, model,
+                        tk_optional: TimestepKeyframeGroup=None,
                         timestep_keyframe: TimestepKeyframeGroup=None
                         ):
+        if timestep_keyframe is not None: # backwards compatibility
+            tk_optional = timestep_keyframe
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
-        controlnet = load_controlnet(controlnet_path, timestep_keyframe, model)
+        controlnet = load_controlnet(controlnet_path, tk_optional, model)
         if is_advanced_controlnet(controlnet):
             controlnet.verify_all_weights()
         return (controlnet,)
@@ -91,6 +98,7 @@ class AdvancedControlNetApply:
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "model_optional": ("MODEL",),
                 "vae_optional": ("VAE",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 40}),
             }
         }
 
