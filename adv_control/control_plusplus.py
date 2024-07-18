@@ -164,7 +164,7 @@ class ControlNetPlusPlus(ControlNetCLDM):
             controlnet_cond = self.input_hint_block(hint[indexes[idx][0]], emb, context)
             feat_seq = torch.mean(controlnet_cond, dim=(2, 3))
             if idx < indexes.shape[0]:
-                feat_seq += self.task_embedding[indexes[idx][0]]
+                feat_seq += self.task_embedding[indexes[idx][0]].to(dtype=feat_seq.dtype, device=feat_seq.device)
 
             inputs.append(feat_seq.unsqueeze(1))
             condition_list.append(controlnet_cond)
