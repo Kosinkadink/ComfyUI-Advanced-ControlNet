@@ -545,7 +545,7 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             has_temporal_res_block_key = True
         # ControlNet++ check
         elif "task_embedding" in key:
-            raise Exception("ControlNet++ model detected; must be loaded using the Load ControlNet++ Model nodes.")
+            pass
 
     if has_controlnet_key and has_motion_modules_key:
         controlnet_type = ControlWeightType.SPARSECTRL
