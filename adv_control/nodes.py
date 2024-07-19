@@ -2,6 +2,7 @@ import numpy as np
 from torch import Tensor
 
 import folder_paths
+import comfy.sample
 from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
@@ -16,6 +17,11 @@ from .nodes_plusplus import PlusPlusLoaderAdvanced, PlusPlusLoaderSingle, PlusPl
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import LoadImagesFromDirectory
 from .logger import logger
+
+from .sampling import acn_sample_factory
+# inject sample functions
+comfy.sample.sample = acn_sample_factory(comfy.sample.sample)
+comfy.sample.sample_custom = acn_sample_factory(comfy.sample.sample_custom, is_custom=True)
 
 
 class ControlNetLoaderAdvanced:
