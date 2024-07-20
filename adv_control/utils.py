@@ -540,6 +540,14 @@ def get_sorted_list_via_attr(objects: list, attr: str) -> list:
     return sorted_list
 
 
+# DFS Search for Torch.nn.Module, Written by Lvmin
+def torch_dfs(model: torch.nn.Module):
+    result = [model]
+    for child in model.children():
+        result += torch_dfs(child)
+    return result
+
+
 class WeightTypeException(TypeError):
     "Raised when weight not compatible with AdvancedControlBase object"
     pass
