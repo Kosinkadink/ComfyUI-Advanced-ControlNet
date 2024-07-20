@@ -381,7 +381,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         to_return.append(self.control_model_wrapped)
         return to_return
 
-
     def cleanup_advanced(self):
         super().cleanup_advanced()
         self.patch_attn1.cleanup()
@@ -421,7 +420,14 @@ def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
         if module_name not in module_weights:
             module_weights[module_name] = {}
         module_weights[module_name][weight_name] = value
-    
+
+    unet_dtype = comfy.model_management.unet_dtype()
+    load_device = comfy.model_management.get_torch_device()
+    manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
+    ops = comfy.ops.disable_weight_init
+    if manual_cast_dtype is not None:
+        ops = comfy.ops.manual_cast
+
     # next, load each module
     modules = {}
     for module_name, weights in module_weights.items():
@@ -444,16 +450,10 @@ def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
         )
         # load weights into module
         module.load_state_dict(weights)
-        modules[module_name] = module
+        modules[module_name] = module.to(dtype=unet_dtype)
         if len(modules) == 1:
             module.is_first = True
 
-    unet_dtype = comfy.model_management.unet_dtype()
-    load_device = comfy.model_management.get_torch_device()
-    manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
-    ops = comfy.ops.disable_weight_init
-    if manual_cast_dtype is not None:
-        ops = comfy.ops.manual_cast
     #logger.info(f"loaded {ckpt_path} successfully, {len(modules)} modules")
 
     patch_attn1 = LLLitePatch(modules=modules, patch_type=LLLitePatch.ATTN1)
