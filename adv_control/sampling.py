@@ -42,13 +42,13 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
         return ref_set
 
     def get_lllitecn(control: ControlBase):
-        cn_list: list[ControlLLLiteAdvanced] = []
+        cn_dict: dict[ControlLLLiteAdvanced,None] = {}
         if control is None:
-            return cn_list
+            return cn_dict
         if type(control) == ControlLLLiteAdvanced:
-            cn_list.append(control)
-        cn_list.extend(get_lllitecn(control.previous_controlnet))
-        return cn_list
+            cn_dict[control] = None
+        cn_dict.update(get_lllitecn(control.previous_controlnet))
+        return cn_dict
 
     def acn_sample(model: ModelPatcher, *args, **kwargs):
         controlnets_modified = False
@@ -68,20 +68,22 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                 args = tuple(args)
             # look for Advanced ControlNets that will require intervention to work
             ref_set = set()
-            lllite_list: list[ControlLLLiteAdvanced] = []
+            lllite_dict: dict[ControlLLLiteAdvanced, None] = {} # dicts preserve insertion order since py3.7
             if positive is not None:
                 for cond in positive:
                     if "control" in cond[1]:
                         ref_set.update(get_refcn(cond[1]["control"]))
-                        lllite_list.extend(get_lllitecn(cond[1]["control"]))
+                        lllite_dict.update(get_lllitecn(cond[1]["control"]))
             if negative is not None:
                 for cond in negative:
                     if "control" in cond[1]:
                         ref_set.update(get_refcn(cond[1]["control"]))
-                        lllite_list.extend(get_lllitecn(cond[1]["control"]))
+                        lllite_dict.update(get_lllitecn(cond[1]["control"]))
             # if lllite found, apply patches to a cloned model_options, and continue
-            if len(lllite_list) > 0:
+            if len(lllite_dict) > 0:
+                lllite_list = list(lllite_dict.keys())
                 model.model_options = model.model_options.copy()
+                model.model_options["transformer_options"] = model.model_options["transformer_options"].copy()
                 lllite_list.reverse() # reverse so that patches will be applied in expected order
                 for lll in lllite_list:
                     lll.live_model_patches(model.model_options)

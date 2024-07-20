@@ -8,6 +8,8 @@ import torch
 import os
 
 import comfy.utils
+import comfy.ops
+import comfy.model_management
 from comfy.model_patcher import ModelPatcher
 from comfy.controlnet import ControlBase
 
@@ -19,6 +21,11 @@ from .utils import (AdvancedControlBase, TimestepKeyframeGroup, ControlWeights, 
 # based on set_model_patch code in comfy/model_patcher.py
 def set_model_patch(model_options, patch, name):
     to = model_options["transformer_options"]
+    # check if patch was already added
+    if "patches" in to:
+        current_patches = to["patches"].get(name, [])
+        if patch in current_patches:
+            return
     if "patches" not in to:
         to["patches"] = {}
     to["patches"][name] = to["patches"].get(name, []) + [patch]
@@ -270,13 +277,24 @@ class LLLiteModule(torch.nn.Module):
         return cx * mask * control.strength * control._current_timestep_keyframe.strength
 
 
+class ControlLLLiteModules(torch.nn.Module):
+    def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch):
+        super().__init__()
+        self.patch_attn1_modules = torch.nn.Sequential(*list(patch_attn1.modules.values()))
+        self.patch_attn2_modules = torch.nn.Sequential(*list(patch_attn2.modules.values()))
+
+
 class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     # This ControlNet is more of an attention patch than a traditional controlnet
-    def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device=None):
+    def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device, ops: comfy.ops.disable_weight_init):
         super().__init__(device)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
+        self.device = device
+        self.ops = ops
         self.patch_attn1 = patch_attn1.clone_with_control(self)
         self.patch_attn2 = patch_attn2.clone_with_control(self)
+        self.control_model = ControlLLLiteModules(self.patch_attn1, self.patch_attn2)
+        self.control_model_wrapped = ModelPatcher(self.control_model, load_device=device, offload_device=comfy.model_management.unet_offload_device())
         self.latent_dims_div2 = None
         self.latent_dims_div4 = None
 
@@ -358,6 +376,12 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         # return normal controlnet stuff
         return control_prev
     
+    def get_models(self):
+        to_return: list = super().get_models()
+        to_return.append(self.control_model_wrapped)
+        return to_return
+
+
     def cleanup_advanced(self):
         super().cleanup_advanced()
         self.patch_attn1.cleanup()
@@ -366,7 +390,7 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.latent_dims_div4 = None
     
     def copy(self):
-        c = ControlLLLiteAdvanced(self.patch_attn1, self.patch_attn2, self.timestep_keyframes)
+        c = ControlLLLiteAdvanced(self.patch_attn1, self.patch_attn2, self.timestep_keyframes, self.device, self.ops)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
@@ -424,9 +448,15 @@ def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
         if len(modules) == 1:
             module.is_first = True
 
+    unet_dtype = comfy.model_management.unet_dtype()
+    load_device = comfy.model_management.get_torch_device()
+    manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
+    ops = comfy.ops.disable_weight_init
+    if manual_cast_dtype is not None:
+        ops = comfy.ops.manual_cast
     #logger.info(f"loaded {ckpt_path} successfully, {len(modules)} modules")
 
     patch_attn1 = LLLitePatch(modules=modules, patch_type=LLLitePatch.ATTN1)
     patch_attn2 = LLLitePatch(modules=modules, patch_type=LLLitePatch.ATTN2)
-    control = ControlLLLiteAdvanced(patch_attn1=patch_attn1, patch_attn2=patch_attn2, timestep_keyframes=timestep_keyframe)
+    control = ControlLLLiteAdvanced(patch_attn1=patch_attn1, patch_attn2=patch_attn2, timestep_keyframes=timestep_keyframe, device=load_device, ops=ops)
     return control
