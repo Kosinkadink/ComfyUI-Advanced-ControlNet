@@ -12,7 +12,7 @@ ControlNet preprocessors are available through [comfyui_controlnet_aux](https://
 - Replicate ***"ControlNet is more important"*** feature from sd-webui-controlnet extension via ***uncond_multiplier*** on ***Soft Weights***
   - uncond_multiplier=0.0 gives identical results of auto1111's feature, but values between 0.0 and 1.0 can be used without issue to granularly control the setting.
 - ControlNet, T2IAdapter, and ControlLoRA support for sliding context windows
-- ControlLLLite support (requires model_optional to be passed into and out of Apply Advanced ControlNet node)
+- ControlLLLite support
 - SparseCtrl support
 - SVD-ControlNet support
   - Stable Video Diffusion ControlNets trained by **CiaraRowles**: [Depth](https://huggingface.co/CiaraRowles/temporal-controlnet-depth-svd-v1/tree/main/controlnet), [Lineart](https://huggingface.co/CiaraRowles/temporal-controlnet-lineart-svd-v1/tree/main/controlnet)  
