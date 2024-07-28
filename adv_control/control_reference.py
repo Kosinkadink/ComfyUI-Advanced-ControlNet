@@ -14,7 +14,7 @@ from comfy.ldm.modules.diffusionmodules import openaimodel
 
 from .logger import logger
 from .utils import (AdvancedControlBase, ControlWeights, TimestepKeyframeGroup, AbstractPreprocWrapper,
-                    broadcast_image_to_extend)
+                    broadcast_image_to_extend, ORIG_PREVIOUS_CONTROLNET, CONTROL_INIT_BY_ACN)
 
 
 REF_READ_ATTN_CONTROL_LIST = "ref_read_attn_control_list"
@@ -255,16 +255,48 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         return self
 
 
-def handle_context_ref_setup(transformer_options):
-    transformer_options[CONTEXTREF_ATTN_MACHINE_STATE] = MachineState.OFF
-    transformer_options[CONTEXTREF_ADAIN_MACHINE_STATE] = MachineState.OFF
+def handle_context_ref_setup(transformer_options, positive, negative):
+    transformer_options[CONTEXTREF_MACHINE_STATE] = MachineState.OFF
     opts = ReferenceOptions(ReferenceType.ATTN, attn_style_fidelity=1.0, attn_ref_weight=1.0, attn_strength=1.0,  adain_style_fidelity=0.0, adain_ref_weight=0.0)
     cref = ReferenceAdvanced(ref_opts=opts, timestep_keyframes=None)
-    cref.order = -1
+    cref.order = 99
+    cref.is_context_ref = True
     context_ref_list = [cref]
     transformer_options[CONTEXTREF_CONTROL_LIST_ALL] = context_ref_list
     transformer_options[CONTEXTREF_OPTIONS_CLASS] = ReferenceOptions
+    _add_context_ref_to_conds([positive, negative], cref)
     return context_ref_list
+
+
+def _add_context_ref_to_conds(conds: list[list[dict[str]]], context_ref: ReferenceAdvanced):
+    def _add_context_ref_to_existing_control(control: ControlBase, context_ref: ReferenceAdvanced):
+        curr_cn = control
+        while curr_cn is not None:
+            if type(curr_cn) == ReferenceAdvanced and curr_cn.is_context_ref:
+                break
+            if curr_cn.previous_controlnet is not None:
+                curr_cn = curr_cn.previous_controlnet
+                continue
+            orig_previous_controlnet = curr_cn.previous_controlnet
+            # NOTE: code is already in place to restore any ORIG_PREVIOUS_CONTROLNET props
+            setattr(curr_cn, ORIG_PREVIOUS_CONTROLNET, orig_previous_controlnet)
+            curr_cn.previous_controlnet = context_ref
+            curr_cn = orig_previous_controlnet
+
+    def _add_context_ref(actual_cond: dict[str], context_ref: ReferenceAdvanced):
+        # if controls already present on cond, add it to the last previous_controlnet
+        if "control" in actual_cond:
+            return _add_context_ref_to_existing_control(actual_cond["control"], context_ref)
+        # otherwise, need to add it to begin with, and should mark that it should be cleaned after
+        actual_cond["control"] = context_ref
+        actual_cond[CONTROL_INIT_BY_ACN] = True
+    
+    # either add context_ref to end of existing cnet chain, or init 'control' key on actual cond
+    for cond in conds:
+        if cond is not None:
+            for sub_cond in cond:
+                actual_cond = sub_cond[1]
+                _add_context_ref(actual_cond, context_ref)
 
 
 def ref_noise_latents(latents: Tensor, sigma: Tensor, noise: Tensor=None):
@@ -714,29 +746,29 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             
             # do contextref stuff, if needed
             if len(context_controlnets) > 0:
-                # TODO: clean contextref stuff if attn writing or off
-                if transformer_options[CONTEXTREF_ATTN_MACHINE_STATE] in [MachineState.WRITE, MachineState.OFF]:
+                # TODO: clean contextref stuff if contextref is writing or off
+                if transformer_options[CONTEXTREF_MACHINE_STATE] in [MachineState.WRITE, MachineState.OFF]:
                     reference_injections.clean_contextref_module_mem()
                 ### add ContextRef to appropriate lists
                 # attn
-                if transformer_options[CONTEXTREF_ATTN_MACHINE_STATE] == MachineState.WRITE:
-                    write_attn_list.extend(context_attn_controlnets)
-                elif transformer_options[CONTEXTREF_ATTN_MACHINE_STATE] == MachineState.READ:
+                if transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.READ:
                     read_attn_list.extend(context_attn_controlnets)
+                elif transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.WRITE:
+                    write_attn_list.extend(context_attn_controlnets)
                 # adain
-                if transformer_options[CONTEXTREF_ADAIN_MACHINE_STATE] == MachineState.WRITE:
-                    write_attn_list.extend(context_adain_controlnets)
-                elif transformer_options[CONTEXTREF_ADAIN_MACHINE_STATE] == MachineState.READ:
-                    read_attn_list.extend(context_adain_controlnets)
+                if transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.READ:
+                    read_adain_list.extend(context_adain_controlnets)
+                elif transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.WRITE:
+                    write_adain_list.extend(context_adain_controlnets)
             # apply lists, containing both RefCN and ContextRef
             transformer_options[REF_READ_ATTN_CONTROL_LIST] = read_attn_list
             transformer_options[REF_WRITE_ATTN_CONTROL_LIST] = write_attn_list
             transformer_options[REF_READ_ADAIN_CONTROL_LIST] = read_adain_list
             transformer_options[REF_WRITE_ADAIN_CONTROL_LIST] = write_adain_list
-
+            # run diffusion for real
             return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
         finally:
-            # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
+            # make sure ref banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_ref_module_mem()
             if len(adain_controlnets) > 0:
                 openaimodel.forward_timestep_embed = orig_forward_timestep_embed

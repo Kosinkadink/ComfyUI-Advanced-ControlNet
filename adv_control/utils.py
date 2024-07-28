@@ -21,6 +21,10 @@ from .logger import logger
 BIGMIN = -(2**53-1)
 BIGMAX = (2**53-1)
 
+ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
+CONTROL_INIT_BY_ACN = "_control_init_by_ACN"
+
+
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
         # immediately restore load_torch_file to original version

@@ -49,7 +49,7 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
         ref_set: set[ReferenceAdvanced] = set()
         if control is None:
             return ref_set
-        if type(control) == ReferenceAdvanced:
+        if type(control) == ReferenceAdvanced and not control.is_context_ref:
             control.order = order
             order -= 1
             ref_set.add(control)
@@ -79,8 +79,6 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
             if has_sliding_context_windows(model):
                 model.model_options = model.model_options.copy()
                 model.model_options["transformer_options"] = model.model_options["transformer_options"].copy()
-                if has_contextref_enabled(model):
-                    context_refs = handle_context_ref_setup(model.model_options["transformer_options"])
                 # convert all CNs to Advanced if needed
                 controlnets_modified, positive, negative = support_sliding_context_windows(model, positive, negative)
                 if controlnets_modified:
@@ -88,6 +86,10 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                     args[-3] = positive
                     args[-2] = negative
                     args = tuple(args)
+                # enable ContextRef, if requested
+                if has_contextref_enabled(model):
+                    context_refs = handle_context_ref_setup(model.model_options["transformer_options"], positive, negative)
+                    controlnets_modified = True
             # look for Advanced ControlNets that will require intervention to work
             ref_set = set()
             lllite_dict: dict[ControlLLLiteAdvanced, None] = {} # dicts preserve insertion order since py3.7
