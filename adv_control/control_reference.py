@@ -35,8 +35,7 @@ CONTEXTREF_OPTIONS_CLASS = "contextref_options_class"
 CONTEXTREF_CLEAN_FUNC = "contextref_clean_func"
 CONTEXTREF_CONTROL_LIST_ALL = "contextref_control_list_all"
 CONTEXTREF_MACHINE_STATE = "contextref_machine_state"
-CONTEXTREF_ATTN_MACHINE_STATE = "contextref_attn_machine_state"
-CONTEXTREF_ADAIN_MACHINE_STATE = "contextref_adain_machine_state"
+CONTEXTREF_TEMP_COND_IDX = "contextref_temp_cond_idx"
 
 
 class MachineState:
@@ -125,6 +124,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.latent_shape = None
         # ContextRef stuff
         self.is_context_ref = False
+        self.contextref_cond_idx = -1
 
     def any_attn_strength_to_apply(self):
         return self.should_apply_attn_effective_strength or self.should_apply_effective_masks
@@ -327,26 +327,26 @@ class BankStylesBasicTransformerBlock:
         self.bank = []
         self.style_cfgs = []
         self.cn_idx: list[int] = []
-        # contextref
-        self.c_bank = []
-        self.c_style_cfgs = []
-        self.c_cn_idx = []
+        # contextref - list of lists as each cond/uncond stored separately
+        self.c_bank: list[list] = []
+        self.c_style_cfgs: list[list] = []
+        self.c_cn_idx: list[list[int]] = []
 
-    def get_bank(self, ignore_contextref=False):
+    def get_bank(self, cref_idx, ignore_contextref):
         if ignore_contextref:
             return self.bank
-        return self.bank + self.c_bank
+        return self.bank + self.c_bank[cref_idx]
 
-    def get_avg_style_fidelity(self, ignore_contextref=False):
+    def get_avg_style_fidelity(self, cref_idx, ignore_contextref):
         if ignore_contextref:
             return sum(self.style_cfgs) / float(len(self.style_cfgs))
-        combined = self.style_cfgs + self.c_style_cfgs
+        combined = self.style_cfgs + self.c_style_cfgs[cref_idx]
         return sum(combined) / float(len(combined))
     
-    def get_cn_idxs(self, ignore_contxtref=False):
+    def get_cn_idxs(self, cref_idx, ignore_contxtref):
         if ignore_contxtref:
             return self.cn_idx
-        return self.cn_idx + self.c_cn_idx
+        return self.cn_idx + self.c_cn_idx[cref_idx]
 
     def clean_ref(self):
         del self.bank
@@ -377,30 +377,30 @@ class BankStylesTimestepEmbedSequential:
         self.style_cfgs = []
         self.cn_idx: list[int] = []
         # cref
-        self.c_var_bank = []
-        self.c_mean_bank = []
-        self.c_style_cfgs = []
-        self.c_cn_idx: list[int] = []
+        self.c_var_bank: list[list] = []
+        self.c_mean_bank: list[list] = []
+        self.c_style_cfgs: list[list] = []
+        self.c_cn_idx: list[list[int]] = []
 
-    def get_var_bank(self, ignore_contextref=False):
+    def get_var_bank(self, cref_idx, ignore_contextref):
         if ignore_contextref:
             return self.var_bank
-        return self.var_bank + self.c_var_bank
+        return self.var_bank + self.c_var_bank[cref_idx]
 
-    def get_mean_bank(self, ignore_contextref=False):
+    def get_mean_bank(self, cref_idx, ignore_contextref):
         if ignore_contextref:
             return self.mean_bank
-        return self.mean_bank + self.c_mean_bank
+        return self.mean_bank + self.c_mean_bank[cref_idx]
 
-    def get_style_cfgs(self, ignore_contextref=False):
+    def get_style_cfgs(self, cref_idx, ignore_contextref):
         if ignore_contextref:
             return self.style_cfgs
-        return self.style_cfgs + self.c_style_cfgs
+        return self.style_cfgs + self.c_style_cfgs[cref_idx]
 
-    def get_cn_idx(self, ignore_contextref=False):
+    def get_cn_idxs(self, cref_idx, ignore_contextref):
         if ignore_contextref:
             return self.cn_idx
-        return self.cn_idx + self.c_cn_idx
+        return self.cn_idx + self.c_cn_idx[cref_idx]
 
     def clean_ref(self):
         del self.mean_bank
@@ -528,141 +528,6 @@ class ReferenceInjections:
         self.diffusion_model_orig_forward = None
 
 
-def HACK_factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
-    def forward_inject_UNetModel(self, x: Tensor, *args, **kwargs):
-        # get control and transformer_options from kwargs
-        real_args = list(args)
-        real_kwargs = list(kwargs.keys())
-        control = kwargs.get("control", None)
-        transformer_options = kwargs.get("transformer_options", {})
-        # look for ReferenceAttnPatch objects to get ReferenceAdvanced objects
-        ref_controlnets: list[ReferenceAdvanced] = transformer_options[REF_CONTROL_LIST_ALL]
-        # discard any controlnets that should not run
-        ref_controlnets = [x for x in ref_controlnets if x.should_run()]
-        # if nothing related to reference controlnets, do nothing special
-        if len(ref_controlnets) == 0:
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-        try:
-            # assign cond and uncond idxs
-            batched_number = len(transformer_options["cond_or_uncond"])
-            per_batch = x.shape[0] // batched_number
-            indiv_conds = []
-            for cond_type in transformer_options["cond_or_uncond"]:
-                indiv_conds.extend([cond_type] * per_batch)
-            transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
-            transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
-            # check which controlnets do which thing
-            attn_controlnets = []
-            adain_controlnets = []
-            for control in ref_controlnets:
-                if ReferenceType.is_attn(control.ref_opts.reference_type):
-                    attn_controlnets.append(control)
-                if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    adain_controlnets.append(control)
-            if len(adain_controlnets) > 0:
-                # ComfyUI uses forward_timestep_embed with the TimestepEmbedSequential passed into it
-                orig_forward_timestep_embed = openaimodel.forward_timestep_embed
-                openaimodel.forward_timestep_embed = forward_timestep_embed_ref_inject_factory(orig_forward_timestep_embed)
-            
-            context_ref = ref_controlnets[0]
-            if transformer_options[CONTEXTREF_ATTN_MACHINE_STATE] in [MachineState.WRITE, MachineState.OFF]:
-                reference_injections.clean_module_mem()
-            transformer_options[REF_ATTN_MACHINE_STATE] = transformer_options[CONTEXTREF_ATTN_MACHINE_STATE]
-            transformer_options[REF_ADAIN_MACHINE_STATE] = transformer_options[CONTEXTREF_ADAIN_MACHINE_STATE]
-            transformer_options[REF_ATTN_CONTROL_LIST] = [context_ref]
-            transformer_options[REF_ADAIN_CONTROL_LIST] = [context_ref]
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-            
-            # handle running diffusion with ref cond hints
-            for control in ref_controlnets:
-                if ReferenceType.is_attn(control.ref_opts.reference_type):
-                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.WRITE
-                else:
-                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.OFF
-                if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.WRITE
-                else:
-                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.OFF
-                transformer_options[REF_ATTN_CONTROL_LIST] = [control]
-                transformer_options[REF_ADAIN_CONTROL_LIST] = [control]
-
-                orig_kwargs = kwargs
-                if not control.ref_opts.ref_with_other_cns:
-                    kwargs = kwargs.copy()
-                    kwargs["control"] = None
-                reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
-                kwargs = orig_kwargs
-            # run diffusion for real now
-            transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_ATTN_CONTROL_LIST] = attn_controlnets
-            transformer_options[REF_ADAIN_CONTROL_LIST] = adain_controlnets
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-        finally:
-            # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
-            #reference_injections.clean_module_mem()
-            if len(adain_controlnets) > 0:
-                openaimodel.forward_timestep_embed = orig_forward_timestep_embed
-
-
-
-        if len(ref_controlnets) == 0:
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-        try:
-            # assign cond and uncond idxs
-            batched_number = len(transformer_options["cond_or_uncond"])
-            per_batch = x.shape[0] // batched_number
-            indiv_conds = []
-            for cond_type in transformer_options["cond_or_uncond"]:
-                indiv_conds.extend([cond_type] * per_batch)
-            transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
-            transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
-            # check which controlnets do which thing
-            attn_controlnets = []
-            adain_controlnets = []
-            for control in ref_controlnets:
-                if ReferenceType.is_attn(control.ref_opts.reference_type):
-                    attn_controlnets.append(control)
-                if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    adain_controlnets.append(control)
-            if len(adain_controlnets) > 0:
-                # ComfyUI uses forward_timestep_embed with the TimestepEmbedSequential passed into it
-                orig_forward_timestep_embed = openaimodel.forward_timestep_embed
-                openaimodel.forward_timestep_embed = forward_timestep_embed_ref_inject_factory(orig_forward_timestep_embed)
-            # handle running diffusion with ref cond hints
-            for control in ref_controlnets:
-                if ReferenceType.is_attn(control.ref_opts.reference_type):
-                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.WRITE
-                else:
-                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.OFF
-                if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.WRITE
-                else:
-                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.OFF
-                transformer_options[REF_ATTN_CONTROL_LIST] = [control]
-                transformer_options[REF_ADAIN_CONTROL_LIST] = [control]
-
-                orig_kwargs = kwargs
-                if not control.ref_opts.ref_with_other_cns:
-                    kwargs = kwargs.copy()
-                    kwargs["control"] = None
-                reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
-                kwargs = orig_kwargs
-            # run diffusion for real now
-            transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_ATTN_CONTROL_LIST] = attn_controlnets
-            transformer_options[REF_ADAIN_CONTROL_LIST] = adain_controlnets
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-        finally:
-            # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
-            reference_injections.clean_module_mem()
-            if len(adain_controlnets) > 0:
-                openaimodel.forward_timestep_embed = orig_forward_timestep_embed
-
-    return forward_inject_UNetModel
-
-
 def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
     def forward_inject_UNetModel(self, x: Tensor, *args, **kwargs):
         # get control and transformer_options from kwargs
@@ -674,6 +539,10 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
         # get ReferenceAdvanced objects
         ref_controlnets: list[ReferenceAdvanced] = transformer_options.get(REF_CONTROL_LIST_ALL, [])
         context_controlnets: list[ReferenceAdvanced] = transformer_options.get(CONTEXTREF_CONTROL_LIST_ALL, [])
+        # clean contextref stuff if OFF
+        if len(context_controlnets) > 0 and transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.OFF:
+            reference_injections.clean_contextref_module_mem()
+            context_controlnets = []
         # discard any controlnets that should not run
         ref_controlnets = [z for z in ref_controlnets if z.should_run()]
         context_controlnets = [z for z in context_controlnets if z.should_run()]
@@ -699,6 +568,13 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                     adain_controlnets.append(control)
             context_attn_controlnets = []
             context_adain_controlnets = []
+            # for ease of access, store current contextref_cond_idx value
+            if len(context_controlnets) == 0:
+                transformer_options[CONTEXTREF_TEMP_COND_IDX] = -1
+            else:
+                transformer_options[CONTEXTREF_TEMP_COND_IDX] = context_controlnets[0].contextref_cond_idx
+                # logger.info(f"{transformer_options[CONTEXTREF_MACHINE_STATE]}: {transformer_options[CONTEXTREF_TEMP_COND_IDX]}")
+            
             for control in context_controlnets:
                 if ReferenceType.is_attn(control.ref_opts.reference_type):
                     context_attn_controlnets.append(control)
@@ -746,8 +622,8 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             
             # do contextref stuff, if needed
             if len(context_controlnets) > 0:
-                # TODO: clean contextref stuff if contextref is writing or off
-                if transformer_options[CONTEXTREF_MACHINE_STATE] in [MachineState.WRITE, MachineState.OFF]:
+                # clean contextref stuff if first WRITE
+                if context_controlnets[0].contextref_cond_idx == 0 and transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.WRITE:
                     reference_injections.clean_contextref_module_mem()
                 ### add ContextRef to appropriate lists
                 # attn
@@ -766,82 +642,19 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             transformer_options[REF_READ_ADAIN_CONTROL_LIST] = read_adain_list
             transformer_options[REF_WRITE_ADAIN_CONTROL_LIST] = write_adain_list
             # run diffusion for real
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
+            try:
+                return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
+            finally:
+                # increment current cond idx
+                if len(context_controlnets) > 0:
+                    for cn in context_controlnets:
+                        cn.contextref_cond_idx += 1
         finally:
             # make sure ref banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_ref_module_mem()
             if len(adain_controlnets) > 0:
                 openaimodel.forward_timestep_embed = orig_forward_timestep_embed
 
-    return forward_inject_UNetModel
-
-
-
-def ORIG_factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
-    def forward_inject_UNetModel(self, x: Tensor, *args, **kwargs):
-        # get control and transformer_options from kwargs
-        real_args = list(args)
-        real_kwargs = list(kwargs.keys())
-        control = kwargs.get("control", None)
-        transformer_options = kwargs.get("transformer_options", {})
-        # look for ReferenceAttnPatch objects to get ReferenceAdvanced objects
-        ref_controlnets: list[ReferenceAdvanced] = transformer_options[REF_CONTROL_LIST_ALL]
-        # discard any controlnets that should not run
-        ref_controlnets = [x for x in ref_controlnets if x.should_run()]
-        # if nothing related to reference controlnets, do nothing special
-        if len(ref_controlnets) == 0:
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-        try:
-            # assign cond and uncond idxs
-            batched_number = len(transformer_options["cond_or_uncond"])
-            per_batch = x.shape[0] // batched_number
-            indiv_conds = []
-            for cond_type in transformer_options["cond_or_uncond"]:
-                indiv_conds.extend([cond_type] * per_batch)
-            transformer_options[REF_UNCOND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 1]
-            transformer_options[REF_COND_IDXS] = [i for i, x in enumerate(indiv_conds) if x == 0]
-            # check which controlnets do which thing
-            attn_controlnets = []
-            adain_controlnets = []
-            for control in ref_controlnets:
-                if ReferenceType.is_attn(control.ref_opts.reference_type):
-                    attn_controlnets.append(control)
-                if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    adain_controlnets.append(control)
-            if len(adain_controlnets) > 0:
-                # ComfyUI uses forward_timestep_embed with the TimestepEmbedSequential passed into it
-                orig_forward_timestep_embed = openaimodel.forward_timestep_embed
-                openaimodel.forward_timestep_embed = forward_timestep_embed_ref_inject_factory(orig_forward_timestep_embed)
-            # handle running diffusion with ref cond hints
-            for control in ref_controlnets:
-                if ReferenceType.is_attn(control.ref_opts.reference_type):
-                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.WRITE
-                else:
-                    transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.OFF
-                if ReferenceType.is_adain(control.ref_opts.reference_type):
-                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.WRITE
-                else:
-                    transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.OFF
-                transformer_options[REF_ATTN_CONTROL_LIST] = [control]
-                transformer_options[REF_ADAIN_CONTROL_LIST] = [control]
-
-                orig_kwargs = kwargs
-                if not control.ref_opts.ref_with_other_cns:
-                    kwargs = kwargs.copy()
-                    kwargs["control"] = None
-                reference_injections.diffusion_model_orig_forward(control.cond_hint.to(dtype=x.dtype).to(device=x.device), *args, **kwargs)
-                kwargs = orig_kwargs
-            # run diffusion for real now
-            transformer_options[REF_ATTN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_ADAIN_MACHINE_STATE] = MachineState.READ
-            transformer_options[REF_ATTN_CONTROL_LIST] = attn_controlnets
-            transformer_options[REF_ADAIN_CONTROL_LIST] = adain_controlnets
-            return reference_injections.diffusion_model_orig_forward(x, *args, **kwargs)
-        finally:
-            # make sure banks are cleared no matter what happens - otherwise, RIP VRAM
-            reference_injections.clean_module_mem()
-            if len(adain_controlnets) > 0:
-                openaimodel.forward_timestep_embed = orig_forward_timestep_embed
 
     return forward_inject_UNetModel
 
@@ -887,7 +700,8 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
     ref_write_cns: list[ReferenceAdvanced] = transformer_options.get(REF_WRITE_ATTN_CONTROL_LIST, [])
     ref_read_cns: list[ReferenceAdvanced] = transformer_options.get(REF_READ_ATTN_CONTROL_LIST, [])
-    ignore_contextref_read = False # if writing to bank, should NOT be read in the same execution
+    cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
+    ignore_contextref_read = cref_cond_idx < 0 # if writing to bank, should NOT be read in the same execution
 
     # if any refs to WRITE, save n and style_fidelity
     if len(ref_write_cns) > 0:
@@ -897,10 +711,11 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
                 if cached_n is None:
                     cached_n = n.detach().clone()
                 if refcn.is_context_ref: # store separately for RefCN and ContextRef
-                    self.injection_holder.bank_styles.c_bank.append(cached_n)
-                    self.injection_holder.bank_styles.c_style_cfgs.append(ref_write_cns[0].ref_opts.attn_style_fidelity)
-                    self.injection_holder.bank_styles.c_cn_idx.append(ref_write_cns[0].order)
-                    ignore_contextref_read = True 
+                    # add a whole list to match expected type when combining
+                    self.injection_holder.bank_styles.c_bank.append([cached_n])
+                    self.injection_holder.bank_styles.c_style_cfgs.append([ref_write_cns[0].ref_opts.attn_style_fidelity])
+                    self.injection_holder.bank_styles.c_cn_idx.append([ref_write_cns[0].order])
+                    ignore_contextref_read = True
                 else:
                     self.injection_holder.bank_styles.bank.append(cached_n)
                     self.injection_holder.bank_styles.style_cfgs.append(ref_write_cns[0].ref_opts.attn_style_fidelity)
@@ -930,12 +745,13 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             value_attn1 = n
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
-        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(ignore_contextref_read)) > 0:
+        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(cref_cond_idx, ignore_contextref_read)) > 0:
             bank_styles = self.injection_holder.bank_styles
-            style_fidelity = bank_styles.get_avg_style_fidelity(ignore_contextref_read)
-            real_bank = bank_styles.get_bank(ignore_contextref_read).copy()
+            style_fidelity = bank_styles.get_avg_style_fidelity(cref_cond_idx, ignore_contextref_read)
+            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read).copy()
+            real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
             cn_idx = 0
-            for idx, order in enumerate(bank_styles.get_cn_idxs(ignore_contextref_read)):
+            for idx, order in enumerate(real_cn_idxs):
                 # make sure matching ref cn is selected
                 for i in range(cn_idx, len(ref_read_cns)):
                     if ref_read_cns[i].order == order:
@@ -966,14 +782,15 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n = self.attn1.to_out(n)
     else:
         # Reference CN READ - no attn1_replace_patch
-        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(ignore_contextref_read)) > 0:
+        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(cref_cond_idx, ignore_contextref_read)) > 0:
             if context_attn1 is None:
                 context_attn1 = n
             bank_styles = self.injection_holder.bank_styles
-            style_fidelity = bank_styles.get_avg_style_fidelity(ignore_contextref_read)
-            real_bank = bank_styles.get_bank(ignore_contextref_read).copy()
+            style_fidelity = bank_styles.get_avg_style_fidelity(cref_cond_idx, ignore_contextref_read)
+            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read).copy()
+            real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
             cn_idx = 0
-            for idx, order in enumerate(bank_styles.get_cn_idxs(ignore_contextref_read)):
+            for idx, order in enumerate(real_cn_idxs):
                 # make sure matching ref cn is selected
                 for i in range(cn_idx, len(ref_read_cns)):
                     if ref_read_cns[i].order == order:
@@ -1071,17 +888,19 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
         # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
         ref_write_cns: list[ReferenceAdvanced] = transformer_options.get(REF_WRITE_ADAIN_CONTROL_LIST, [])
         ref_read_cns: list[ReferenceAdvanced] = transformer_options.get(REF_READ_ADAIN_CONTROL_LIST, [])
-        ignore_contextref_read = False # if writing to bank, should NOT be read in the same execution
+        cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
+        ignore_contextref_read = cref_cond_idx < 0 # if writing to bank, should NOT be read in the same execution
 
         # if any refs to WRITE, save var, mean, and style_cfg
         for refcn in ref_write_cns:
             if refcn.ref_opts.adain_ref_weight > ts.injection_holder.gn_weight:
                 var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
                 if refcn.is_context_ref:
-                    ts.injection_holder.bank_styles.c_var_bank.append(var)
-                    ts.injection_holder.bank_styles.c_mean_bank.append(mean)
-                    ts.injection_holder.bank_styles.c_style_cfgs.append(refcn.ref_opts.adain_style_fidelity)
-                    ts.injection_holder.bank_styles.c_cn_idx.append(refcn.order)
+                    # add a whole list to match expected type when combining
+                    ts.injection_holder.bank_styles.c_var_bank.append([var])
+                    ts.injection_holder.bank_styles.c_mean_bank.append([mean])
+                    ts.injection_holder.bank_styles.c_style_cfgs.append([refcn.ref_opts.adain_style_fidelity])
+                    ts.injection_holder.bank_styles.c_cn_idx.append([refcn.order])
                     ignore_contextref_read = True
                 else:
                     ts.injection_holder.bank_styles.var_bank.append(var)
@@ -1091,16 +910,17 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
 
         # if any refs to READ, do math with saved var, mean, and style_cfg
         if len(ref_read_cns) > 0:
-            if len(ts.injection_holder.bank_styles.get_var_bank(ignore_contextref_read)) > 0:
+            if len(ts.injection_holder.bank_styles.get_var_bank(cref_cond_idx, ignore_contextref_read)) > 0:
                 bank_styles = ts.injection_holder.bank_styles
                 var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
                 std = torch.maximum(var, torch.zeros_like(var) + eps) ** 0.5
                 y_uc = torch.zeros_like(x)
                 cn_idx = 0
-                real_style_cfgs = bank_styles.get_style_cfgs(ignore_contextref_read)
-                real_var_bank = bank_styles.get_var_bank(ignore_contextref_read)
-                real_mean_bank = bank_styles.get_mean_bank(ignore_contextref_read)
-                for idx, order in enumerate(bank_styles.get_cn_idx(ignore_contextref_read)):
+                real_style_cfgs = bank_styles.get_style_cfgs(cref_cond_idx, ignore_contextref_read)
+                real_var_bank = bank_styles.get_var_bank(cref_cond_idx, ignore_contextref_read)
+                real_mean_bank = bank_styles.get_mean_bank(cref_cond_idx, ignore_contextref_read)
+                real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
+                for idx, order in enumerate(real_cn_idxs):
                     # make sure matching ref cn is selected
                     for i in range(cn_idx, len(ref_read_cns)):
                         if ref_read_cns[i].order == order:
@@ -1117,8 +937,8 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
                         sub_y_uc = sub_y_uc * effective_strength + x * (1-effective_strength)
                     y_uc += sub_y_uc
                 # get average, if more than one
-                if len(bank_styles.cn_idx) > 1:
-                    y_uc /= len(bank_styles.cn_idx)
+                if len(real_cn_idxs) > 1:
+                    y_uc /= len(real_cn_idxs)
                 y_c = y_uc.clone()
                 if len(uc_idx_mask) > 0 and not math.isclose(style_fidelity, 0.0):
                     y_c[uc_idx_mask] = x.to(y_c.dtype)[uc_idx_mask]
