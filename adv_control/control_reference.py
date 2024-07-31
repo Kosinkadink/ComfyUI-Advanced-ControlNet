@@ -41,8 +41,15 @@ CONTEXTREF_TEMP_COND_IDX = "contextref_temp_cond_idx"
 class MachineState:
     WRITE = "write"
     READ = "read"
+    READ_WRITE = "read_write"
     STYLEALIGN = "stylealign"
     OFF = "off"
+
+def is_read(state: str):
+    return state in [MachineState.READ, MachineState.READ_WRITE]
+
+def is_write(state: str):
+    return state in [MachineState.WRITE, MachineState.READ_WRITE]
 
 
 class ReferenceType:
@@ -348,6 +355,22 @@ class BankStylesBasicTransformerBlock:
             return self.cn_idx
         return self.cn_idx + self.c_cn_idx[cref_idx]
 
+    def init_cref_for_idx(self, cref_idx: int):
+        # makes sure cref lists can accommodate cref_idx 
+        if cref_idx < 0:
+            return
+        while cref_idx >= len(self.c_bank):
+            self.c_bank.append([])
+            self.c_style_cfgs.append([])
+            self.c_cn_idx.append([])
+
+    def clear_cref_for_idx(self, cref_idx: int):
+        if cref_idx < 0 or cref_idx >= len(self.c_bank):
+            return
+        self.c_bank[cref_idx] = []
+        self.c_style_cfgs[cref_idx] = []
+        self.c_cn_idx[cref_idx] = []
+
     def clean_ref(self):
         del self.bank
         del self.style_cfgs
@@ -623,18 +646,18 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             # do contextref stuff, if needed
             if len(context_controlnets) > 0:
                 # clean contextref stuff if first WRITE
-                if context_controlnets[0].contextref_cond_idx == 0 and transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.WRITE:
-                    reference_injections.clean_contextref_module_mem()
+                # if context_controlnets[0].contextref_cond_idx == 0 and is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
+                #     reference_injections.clean_contextref_module_mem()
                 ### add ContextRef to appropriate lists
                 # attn
-                if transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.READ:
+                if is_read(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     read_attn_list.extend(context_attn_controlnets)
-                elif transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.WRITE:
+                elif is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     write_attn_list.extend(context_attn_controlnets)
                 # adain
-                if transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.READ:
+                if is_read(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     read_adain_list.extend(context_adain_controlnets)
-                elif transformer_options[CONTEXTREF_MACHINE_STATE] == MachineState.WRITE:
+                elif is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     write_adain_list.extend(context_adain_controlnets)
             # apply lists, containing both RefCN and ContextRef
             transformer_options[REF_READ_ATTN_CONTROL_LIST] = read_attn_list
@@ -697,30 +720,32 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     # Reference CN stuff
     uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
     #c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
-    # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
+    # WRITE mode may have only 1 ReferenceAdvanced for RefCN at a time, other modes will have all ReferenceAdvanced
     ref_write_cns: list[ReferenceAdvanced] = transformer_options.get(REF_WRITE_ATTN_CONTROL_LIST, [])
     ref_read_cns: list[ReferenceAdvanced] = transformer_options.get(REF_READ_ATTN_CONTROL_LIST, [])
     cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
     ignore_contextref_read = cref_cond_idx < 0 # if writing to bank, should NOT be read in the same execution
 
+    cached_n = None
+    cref_write_cns: list[ReferenceAdvanced] = []
+    # check if any WRITE cns are applicable; Reference CN WRITEs immediately, ContextREF WRITEs after READ completed
     # if any refs to WRITE, save n and style_fidelity
     if len(ref_write_cns) > 0:
-        cached_n = None
         for refcn in ref_write_cns:
             if refcn.ref_opts.attn_ref_weight > self.injection_holder.attn_weight:
                 if cached_n is None:
                     cached_n = n.detach().clone()
-                if refcn.is_context_ref: # store separately for RefCN and ContextRef
-                    # add a whole list to match expected type when combining
-                    self.injection_holder.bank_styles.c_bank.append([cached_n])
-                    self.injection_holder.bank_styles.c_style_cfgs.append([ref_write_cns[0].ref_opts.attn_style_fidelity])
-                    self.injection_holder.bank_styles.c_cn_idx.append([ref_write_cns[0].order])
-                    ignore_contextref_read = True
-                else:
+                # for ContextRef, make sure relevant lists are long enough to cond_idx
+                # store RefCN and ContextRef stuff separately
+                if refcn.is_context_ref:
+                    cref_write_cns.append(refcn)
+                    self.injection_holder.bank_styles.init_cref_for_idx(cref_cond_idx)
+                else: # Reference CN WRITE
                     self.injection_holder.bank_styles.bank.append(cached_n)
-                    self.injection_holder.bank_styles.style_cfgs.append(ref_write_cns[0].ref_opts.attn_style_fidelity)
-                    self.injection_holder.bank_styles.cn_idx.append(ref_write_cns[0].order)
-        del cached_n
+                    self.injection_holder.bank_styles.style_cfgs.append(refcn.ref_opts.attn_style_fidelity)
+                    self.injection_holder.bank_styles.cn_idx.append(refcn.order)
+        if len(cref_write_cns) == 0:
+            del cached_n
 
     if "attn1_patch" in transformer_patches:
         patch = transformer_patches["attn1_patch"]
@@ -814,6 +839,17 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             bank_styles.clean_ref()
         else:
             n = self.attn1(n, context=context_attn1, value=value_attn1)
+
+    # ContextRef CN WRITE
+    if len(cref_write_cns) > 0:
+        # clear so that ContextRef CNs can properly 'replace' previous value at cond_idx
+        self.injection_holder.bank_styles.clear_cref_for_idx(cref_cond_idx)
+        for refcn in cref_write_cns:
+            # add a whole list to match expected type when combining
+            self.injection_holder.bank_styles.c_bank[cref_cond_idx].append(cached_n)
+            self.injection_holder.bank_styles.c_style_cfgs[cref_cond_idx].append(refcn.ref_opts.attn_style_fidelity)
+            self.injection_holder.bank_styles.c_cn_idx[cref_cond_idx].append(refcn.order)
+        del cached_n
 
     if "attn1_output_patch" in transformer_patches:
         patch = transformer_patches["attn1_output_patch"]
