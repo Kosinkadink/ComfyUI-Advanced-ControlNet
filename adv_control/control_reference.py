@@ -652,12 +652,12 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
                 # attn
                 if is_read(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     read_attn_list.extend(context_attn_controlnets)
-                elif is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
+                if is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     write_attn_list.extend(context_attn_controlnets)
                 # adain
                 if is_read(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     read_adain_list.extend(context_adain_controlnets)
-                elif is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
+                if is_write(transformer_options[CONTEXTREF_MACHINE_STATE]):
                     write_adain_list.extend(context_adain_controlnets)
             # apply lists, containing both RefCN and ContextRef
             transformer_options[REF_READ_ATTN_CONTROL_LIST] = read_attn_list
