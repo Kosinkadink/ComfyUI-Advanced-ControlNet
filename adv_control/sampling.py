@@ -32,16 +32,15 @@ def has_sliding_context_windows(model):
     return context_options.context_length is not None
 
 
-def has_contextref_enabled(model):
+def get_contextref_obj(model):
     motion_injection_params = getattr(model, "motion_injection_params", None)
     if motion_injection_params is None:
-        return False
+        return None
     context_options = getattr(motion_injection_params, "context_options")
     extras = getattr(context_options, "extras", None)
     if extras is None:
-        return False
-    context_ref = getattr(extras, "context_ref", None)
-    return context_ref is not None
+        return None
+    return getattr(extras, "context_ref", None)
 
 
 def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
@@ -87,8 +86,9 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                     args[-2] = negative
                     args = tuple(args)
                 # enable ContextRef, if requested
-                if has_contextref_enabled(model):
-                    context_refs = handle_context_ref_setup(model.model_options["transformer_options"], positive, negative)
+                existing_contextref_obj = get_contextref_obj(model)
+                if existing_contextref_obj is not None:
+                    context_refs = handle_context_ref_setup(existing_contextref_obj, model.model_options["transformer_options"], positive, negative)
                     controlnets_modified = True
             # look for Advanced ControlNets that will require intervention to work
             ref_set = set()

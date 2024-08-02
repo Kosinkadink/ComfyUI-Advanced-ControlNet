@@ -104,7 +104,23 @@ class ReferenceOptions:
                                 attn_style_fidelity=style_fidelity, adain_style_fidelity=style_fidelity,
                                 attn_ref_weight=ref_weight, adain_ref_weight=ref_weight,
                                 ref_with_other_cns=ref_with_other_cns)
-
+    
+    @staticmethod
+    def create_from_kwargs(attn_style_fidelity=0.0, adain_style_fidelity=0.0,
+                         attn_ref_weight=0.0, adain_ref_weight=0.0,
+                         attn_strength=0.0, adain_strength=0.0, **kwargs):
+        has_attn = attn_strength > 0.0
+        has_adain = adain_strength > 0.0
+        if has_attn and has_adain:
+            reference_type = ReferenceType.ATTN_ADAIN
+        elif has_adain:
+            reference_type = ReferenceType.ADAIN
+        else:
+            reference_type = ReferenceType.ATTN
+        return ReferenceOptions(reference_type=reference_type,
+                                attn_style_fidelity=float(attn_style_fidelity), adain_style_fidelity=float(adain_style_fidelity),
+                                attn_ref_weight=float(attn_ref_weight), adain_ref_weight=float(adain_ref_weight),
+                                attn_strength=float(attn_strength), adain_strength=float(adain_strength))
 
 
 class ReferencePreprocWrapper(AbstractPreprocWrapper):
@@ -262,9 +278,10 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         return self
 
 
-def handle_context_ref_setup(transformer_options, positive, negative):
+def handle_context_ref_setup(contextref_obj, transformer_options: dict, positive, negative):
     transformer_options[CONTEXTREF_MACHINE_STATE] = MachineState.OFF
-    opts = ReferenceOptions(ReferenceType.ATTN, attn_style_fidelity=1.0, attn_ref_weight=1.0, attn_strength=1.0,  adain_style_fidelity=0.0, adain_ref_weight=0.0)
+    cref_opt_dict = contextref_obj.params.create_dict() # ContextRefParams obj from ADE
+    opts = ReferenceOptions.create_from_kwargs(**cref_opt_dict)
     cref = ReferenceAdvanced(ref_opts=opts, timestep_keyframes=None)
     cref.order = 99
     cref.is_context_ref = True
@@ -340,18 +357,18 @@ class BankStylesBasicTransformerBlock:
         self.c_cn_idx: list[list[int]] = []
 
     def get_bank(self, cref_idx, ignore_contextref):
-        if ignore_contextref:
+        if ignore_contextref or cref_idx >= len(self.c_bank):
             return self.bank
         return self.bank + self.c_bank[cref_idx]
 
     def get_avg_style_fidelity(self, cref_idx, ignore_contextref):
-        if ignore_contextref:
+        if ignore_contextref or cref_idx >= len(self.c_style_cfgs):
             return sum(self.style_cfgs) / float(len(self.style_cfgs))
         combined = self.style_cfgs + self.c_style_cfgs[cref_idx]
         return sum(combined) / float(len(combined))
     
     def get_cn_idxs(self, cref_idx, ignore_contxtref):
-        if ignore_contxtref:
+        if ignore_contxtref or cref_idx >= len(self.c_cn_idx):
             return self.cn_idx
         return self.cn_idx + self.c_cn_idx[cref_idx]
 
@@ -406,24 +423,42 @@ class BankStylesTimestepEmbedSequential:
         self.c_cn_idx: list[list[int]] = []
 
     def get_var_bank(self, cref_idx, ignore_contextref):
-        if ignore_contextref:
+        if ignore_contextref or cref_idx >= len(self.c_var_bank):
             return self.var_bank
         return self.var_bank + self.c_var_bank[cref_idx]
 
     def get_mean_bank(self, cref_idx, ignore_contextref):
-        if ignore_contextref:
+        if ignore_contextref or cref_idx >= len(self.c_mean_bank):
             return self.mean_bank
         return self.mean_bank + self.c_mean_bank[cref_idx]
 
     def get_style_cfgs(self, cref_idx, ignore_contextref):
-        if ignore_contextref:
+        if ignore_contextref or cref_idx >= len(self.c_style_cfgs):
             return self.style_cfgs
         return self.style_cfgs + self.c_style_cfgs[cref_idx]
 
     def get_cn_idxs(self, cref_idx, ignore_contextref):
-        if ignore_contextref:
+        if ignore_contextref or cref_idx >= len(self.c_cn_idx):
             return self.cn_idx
         return self.cn_idx + self.c_cn_idx[cref_idx]
+
+    def init_cref_for_idx(self, cref_idx: int):
+        # makes sure cref lists can accommodate cref_idx 
+        if cref_idx < 0:
+            return
+        while cref_idx >= len(self.c_var_bank):
+            self.c_var_bank.append([])
+            self.c_mean_bank.append([])
+            self.c_style_cfgs.append([])
+            self.c_cn_idx.append([])
+
+    def clear_cref_for_idx(self, cref_idx: int):
+        if cref_idx < 0 or cref_idx >= len(self.c_var_bank):
+            return
+        self.c_var_bank[cref_idx] = []
+        self.c_mean_bank[cref_idx] = []
+        self.c_style_cfgs[cref_idx] = []
+        self.c_cn_idx[cref_idx] = []
 
     def clean_ref(self):
         del self.mean_bank
@@ -730,22 +765,21 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     cref_write_cns: list[ReferenceAdvanced] = []
     # check if any WRITE cns are applicable; Reference CN WRITEs immediately, ContextREF WRITEs after READ completed
     # if any refs to WRITE, save n and style_fidelity
-    if len(ref_write_cns) > 0:
-        for refcn in ref_write_cns:
-            if refcn.ref_opts.attn_ref_weight > self.injection_holder.attn_weight:
-                if cached_n is None:
-                    cached_n = n.detach().clone()
-                # for ContextRef, make sure relevant lists are long enough to cond_idx
-                # store RefCN and ContextRef stuff separately
-                if refcn.is_context_ref:
-                    cref_write_cns.append(refcn)
-                    self.injection_holder.bank_styles.init_cref_for_idx(cref_cond_idx)
-                else: # Reference CN WRITE
-                    self.injection_holder.bank_styles.bank.append(cached_n)
-                    self.injection_holder.bank_styles.style_cfgs.append(refcn.ref_opts.attn_style_fidelity)
-                    self.injection_holder.bank_styles.cn_idx.append(refcn.order)
-        if len(cref_write_cns) == 0:
-            del cached_n
+    for refcn in ref_write_cns:
+        if refcn.ref_opts.attn_ref_weight > self.injection_holder.attn_weight:
+            if cached_n is None:
+                cached_n = n.detach().clone()
+            # for ContextRef, make sure relevant lists are long enough to cond_idx
+            # store RefCN and ContextRef stuff separately
+            if refcn.is_context_ref:
+                cref_write_cns.append(refcn)
+                self.injection_holder.bank_styles.init_cref_for_idx(cref_cond_idx)
+            else: # Reference CN WRITE
+                self.injection_holder.bank_styles.bank.append(cached_n)
+                self.injection_holder.bank_styles.style_cfgs.append(refcn.ref_opts.attn_style_fidelity)
+                self.injection_holder.bank_styles.cn_idx.append(refcn.order)
+    if len(cref_write_cns) == 0:
+        del cached_n
 
     if "attn1_patch" in transformer_patches:
         patch = transformer_patches["attn1_patch"]
@@ -927,22 +961,25 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
         cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
         ignore_contextref_read = cref_cond_idx < 0 # if writing to bank, should NOT be read in the same execution
 
+        cached_var = None
+        cached_mean = None
+        cref_write_cns: list[ReferenceAdvanced] = []
         # if any refs to WRITE, save var, mean, and style_cfg
         for refcn in ref_write_cns:
             if refcn.ref_opts.adain_ref_weight > ts.injection_holder.gn_weight:
-                var, mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
+                if cached_var is None:
+                    cached_var, cached_mean = torch.var_mean(x, dim=(2, 3), keepdim=True, correction=0)
                 if refcn.is_context_ref:
-                    # add a whole list to match expected type when combining
-                    ts.injection_holder.bank_styles.c_var_bank.append([var])
-                    ts.injection_holder.bank_styles.c_mean_bank.append([mean])
-                    ts.injection_holder.bank_styles.c_style_cfgs.append([refcn.ref_opts.adain_style_fidelity])
-                    ts.injection_holder.bank_styles.c_cn_idx.append([refcn.order])
-                    ignore_contextref_read = True
+                    cref_write_cns.append(refcn)
+                    ts.injection_holder.bank_styles.init_cref_for_idx(cref_cond_idx)
                 else:
-                    ts.injection_holder.bank_styles.var_bank.append(var)
-                    ts.injection_holder.bank_styles.mean_bank.append(mean)
+                    ts.injection_holder.bank_styles.var_bank.append(cached_var)
+                    ts.injection_holder.bank_styles.mean_bank.append(cached_mean)
                     ts.injection_holder.bank_styles.style_cfgs.append(refcn.ref_opts.adain_style_fidelity)
                     ts.injection_holder.bank_styles.cn_idx.append(refcn.order)
+        if len(cref_write_cns) == 0:
+            del cached_var
+            del cached_mean
 
         # if any refs to READ, do math with saved var, mean, and style_cfg
         if len(ref_read_cns) > 0:
@@ -980,6 +1017,19 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
                     y_c[uc_idx_mask] = x.to(y_c.dtype)[uc_idx_mask]
                 y = style_fidelity * y_c + (1.0 - style_fidelity) * y_uc
             ts.injection_holder.bank_styles.clean_ref()
+
+        # ContextRef CN WRITE
+        if len(cref_write_cns) > 0:
+            # clear so that ContextRef CNs can properly 'replace' previous value at cond_idx
+            ts.injection_holder.bank_styles.clear_cref_for_idx(cref_cond_idx)
+            for refcn in cref_write_cns:
+                # add a whole list to match expected type when combining
+                ts.injection_holder.bank_styles.c_var_bank[cref_cond_idx].append(cached_var)
+                ts.injection_holder.bank_styles.c_mean_bank[cref_cond_idx].append(cached_mean)
+                ts.injection_holder.bank_styles.c_style_cfgs[cref_cond_idx].append(refcn.ref_opts.adain_style_fidelity)
+                ts.injection_holder.bank_styles.c_cn_idx[cref_cond_idx].append(refcn.order)
+            del cached_var
+            del cached_mean
 
         if y is None:
             y = x
