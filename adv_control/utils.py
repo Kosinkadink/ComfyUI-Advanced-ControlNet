@@ -573,7 +573,8 @@ class AdvancedControlBase:
         self.full_latent_length = 0
         self.context_length = 0
         # timesteps
-        self.t: Tensor = None
+        self.t: float = None
+        self.prev_t: float = None
         self.batched_number: Union[int, IntWithCondOrUncond] = None
         self.batch_size: int = 0
         # weights + override
@@ -635,6 +636,9 @@ class AdvancedControlBase:
         self.t = float(t[0])
         self.batched_number = batched_number
         self.batch_size = len(t)
+        # check if t has changed (otherwise do nothing, as step already accounted for)
+        if self.t == self.prev_t:
+            return
         # get current step percent
         curr_t: float = self.t
         prev_index = self._current_timestep_index
@@ -670,7 +674,8 @@ class AdvancedControlBase:
                     # if eval_tk is outside of percent range, stop looking further
                     else:
                         break
-        
+        # update prev_t
+        self.prev_t = self.t
         # update steps current keyframe is used
         self._current_used_steps += 1
         # if index changed, apply overrides
@@ -936,6 +941,7 @@ class AdvancedControlBase:
         self.full_latent_length = 0
         self.context_length = 0
         self.t = None
+        self.prev_t = None
         self.batched_number = None
         self.batch_size = 0
         self.weights = None
