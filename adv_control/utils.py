@@ -39,7 +39,7 @@ def wrapper_len_factory(orig_len: Callable) -> Callable:
     def wrapper_len(*args, **kwargs):
         cond_or_uncond = args[0]
         real_length = orig_len(*args, **kwargs)
-        if real_length > 0 and type(cond_or_uncond) == list and (cond_or_uncond[0] in [0, 1]):
+        if real_length > 0 and type(cond_or_uncond) == list and isinstance(cond_or_uncond[0], int) and (cond_or_uncond[0] in [0, 1]):
             try:
                 to_return = IntWithCondOrUncond(real_length)
                 setattr(to_return, "cond_or_uncond", cond_or_uncond)
