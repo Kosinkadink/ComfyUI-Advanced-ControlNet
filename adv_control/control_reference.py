@@ -4,6 +4,7 @@ import math
 import torch
 from torch import Tensor
 
+import comfy.model_management
 import comfy.sample
 import comfy.model_patcher
 import comfy.utils
@@ -356,10 +357,15 @@ class BankStylesBasicTransformerBlock:
         self.c_style_cfgs: list[list] = []
         self.c_cn_idx: list[list[int]] = []
 
-    def get_bank(self, cref_idx, ignore_contextref):
+    def get_bank(self, cref_idx, ignore_contextref, cdevice=None):
         if ignore_contextref or cref_idx >= len(self.c_bank):
             return self.bank
-        return self.bank + self.c_bank[cref_idx]
+        real_c_bank_list = self.c_bank[cref_idx]
+        if cdevice != None:
+            real_c_bank_list = real_c_bank_list.copy()
+            for i in range(len(real_c_bank_list)):
+                real_c_bank_list[i] = real_c_bank_list[i].to(cdevice)
+        return self.bank + real_c_bank_list
 
     def get_avg_style_fidelity(self, cref_idx, ignore_contextref):
         if ignore_contextref or cref_idx >= len(self.c_style_cfgs):
@@ -807,7 +813,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
         if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(cref_cond_idx, ignore_contextref_read)) > 0:
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity(cref_cond_idx, ignore_contextref_read)
-            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read).copy()
+            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read, cdevice=n.device).copy()
             real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
             cn_idx = 0
             for idx, order in enumerate(real_cn_idxs):
@@ -846,7 +852,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
                 context_attn1 = n
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity(cref_cond_idx, ignore_contextref_read)
-            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read).copy()
+            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read, cdevice=n.device).copy()
             real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
             cn_idx = 0
             for idx, order in enumerate(real_cn_idxs):
@@ -880,7 +886,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
         self.injection_holder.bank_styles.clear_cref_for_idx(cref_cond_idx)
         for refcn in cref_write_cns:
             # add a whole list to match expected type when combining
-            self.injection_holder.bank_styles.c_bank[cref_cond_idx].append(cached_n)
+            self.injection_holder.bank_styles.c_bank[cref_cond_idx].append(cached_n.to(comfy.model_management.unet_offload_device()))
             self.injection_holder.bank_styles.c_style_cfgs[cref_cond_idx].append(refcn.ref_opts.attn_style_fidelity)
             self.injection_holder.bank_styles.c_cn_idx[cref_cond_idx].append(refcn.order)
         del cached_n
