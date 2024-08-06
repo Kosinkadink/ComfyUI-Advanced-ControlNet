@@ -632,10 +632,8 @@ class AdvancedControlBase:
         self.weights = None
         self.latent_keyframes = None
 
-    def prepare_current_timestep(self, t: Tensor, batched_number: int):
+    def prepare_current_timestep(self, t: Tensor, batched_number: int=1):
         self.t = float(t[0])
-        self.batched_number = batched_number
-        self.batch_size = len(t)
         # check if t has changed (otherwise do nothing, as step already accounted for)
         if self.t == self.prev_t:
             return
@@ -749,6 +747,8 @@ class AdvancedControlBase:
         return True
 
     def get_control_inject(self, x_noisy, t, cond, batched_number):
+        self.batched_number = batched_number
+        self.batch_size = len(t)
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
