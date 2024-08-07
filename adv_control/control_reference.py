@@ -41,6 +41,11 @@ CONTEXTREF_TEMP_COND_IDX = "contextref_temp_cond_idx"
 HIGHEST_VERSION_SUPPORT = 1
 
 
+class RefConst:
+    OPTS = "refcn_opts"
+    CREF_MODE = "contextref_mode"
+
+
 class MachineState:
     WRITE = "write"
     READ = "read"
@@ -140,7 +145,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), allow_condhint_latents=True)
         # TODO: allow vae_optional to be used instead of preprocessor
         #require_vae=True
-        self.ref_opts = ref_opts
+        self._ref_opts = ref_opts
         self.order = 0
         self.model_latent_format = None
         self.model_sampling_current = None
@@ -151,6 +156,12 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         # ContextRef stuff
         self.is_context_ref = False
         self.contextref_cond_idx = -1
+
+    @property
+    def ref_opts(self):
+        if self._current_timestep_keyframe is not None and self._current_timestep_keyframe.has_control_weights():
+            return self._current_timestep_keyframe.control_weights.extras.get(RefConst.OPTS, self._ref_opts)
+        return self._ref_opts
 
     def any_attn_strength_to_apply(self):
         return self.should_apply_attn_effective_strength or self.should_apply_effective_masks
@@ -186,6 +197,12 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.apply_advanced_strengths_and_masks(x=real_mask, batched_number=self.batched_number)
         return real_mask
 
+    def get_contextref_mode_replace(self):
+        # used by ADE to get mode_replace for current keyframe
+        if self._current_timestep_keyframe.has_control_weights():
+            return self._current_timestep_keyframe.control_weights.extras.get(RefConst.CREF_MODE, None)
+        return None
+
     def should_run(self):
         running = super().should_run()
         if not running:
@@ -206,13 +223,19 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
             self.cond_hint_original = self.cond_hint_original.condhint
         self.model_latent_format = model.latent_format # LatentFormat object, used to process_in latent cond_hint
         self.model_sampling_current = model.model_sampling
-        # SDXL is more sensitive to style_fidelity according to sd-webui-controlnet comments
-        if type(model).__name__ == "SDXL":
-            self.ref_opts.attn_style_fidelity = self.ref_opts.original_attn_style_fidelity ** 3.0
-            self.ref_opts.adain_style_fidelity = self.ref_opts.original_adain_style_fidelity ** 3.0
-        else:
-            self.ref_opts.attn_style_fidelity = self.ref_opts.original_attn_style_fidelity
-            self.ref_opts.adain_style_fidelity = self.ref_opts.original_adain_style_fidelity
+        # SDXL is more sensitive to style_fidelity according to sd-webui-controlnet comments;
+        # prepare all ref_opts accordingly
+        all_ref_opts = [self._ref_opts]
+        for kf in self.timestep_keyframes.keyframes:
+            if kf.has_control_weights() and RefConst.OPTS in kf.control_weights.extras:
+                all_ref_opts.append(kf.control_weights.extras[RefConst.OPTS])
+        for ropts in all_ref_opts:
+            if type(model).__name__ == "SDXL":
+                ropts.attn_style_fidelity = ropts.original_attn_style_fidelity ** 3.0
+                ropts.adain_style_fidelity = ropts.original_adain_style_fidelity ** 3.0
+            else:
+                ropts.attn_style_fidelity = ropts.original_attn_style_fidelity
+                ropts.adain_style_fidelity = ropts.original_adain_style_fidelity
 
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
         # normal ControlNet stuff
@@ -320,9 +343,18 @@ def _create_tks_from_dict_list(dlist: list[dict[str]]) -> TimestepKeyframeGroup:
         mask = d["mask"]
         tune = d["tune"]
         mode = d["mode"]
+        weights = None
+        extras = {}
+        if tune is not None:
+            cref_opt_dict = tune.create_dict() # ContextRefTune obj from ADE
+            opts = ReferenceOptions.create_from_kwargs(**cref_opt_dict)
+            extras[RefConst.OPTS] = opts
+        if mode is not None:
+            extras[RefConst.CREF_MODE] = mode
+        weights = ControlWeights.default(extras=extras)
         # create keyframe
         tk = TimestepKeyframe(start_percent=start_percent, guarantee_steps=guarantee_steps, inherit_missing=inherit_missing,
-                              strength=strength, mask_hint_orig=mask)
+                              strength=strength, mask_hint_orig=mask, control_weights=weights)
         tks.add(tk)
     return tks
 
@@ -750,7 +782,7 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
         finally:
             # make sure ref banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_ref_module_mem()
-            if len(adain_controlnets) > 0:
+            if len(adain_controlnets) > 0 or len(context_adain_controlnets) > 0:
                 openaimodel.forward_timestep_embed = orig_forward_timestep_embed
 
 
