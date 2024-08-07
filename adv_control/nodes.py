@@ -231,10 +231,10 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     # Keyframes
     "TimestepKeyframe": "Timestep Keyframe 🛂🅐🅒🅝",
-    "ACN_TimestepKeyframeInterpolation": "Timestep Keyframe Interpolation 🛂🅐🅒🅝",
+    "ACN_TimestepKeyframeInterpolation": "Timestep Keyframe Interp. 🛂🅐🅒🅝",
     "ACN_TimestepKeyframeFromStrengthList": "Timestep Keyframe From List 🛂🅐🅒🅝",
     "LatentKeyframe": "Latent Keyframe 🛂🅐🅒🅝",
-    "LatentKeyframeTiming": "Latent Keyframe Interpolation 🛂🅐🅒🅝",
+    "LatentKeyframeTiming": "Latent Keyframe Interp. 🛂🅐🅒🅝",
     "LatentKeyframeBatchedGroup": "Latent Keyframe From List 🛂🅐🅒🅝",
     "LatentKeyframeGroup": "Latent Keyframe Group 🛂🅐🅒🅝",
     # Conditioning
