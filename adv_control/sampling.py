@@ -11,22 +11,36 @@ from .control_reference import (ReferenceAdvanced, ReferenceInjections,
                                 RefBasicTransformerBlock, RefTimestepEmbedSequential,
                                 InjectionBasicTransformerBlockHolder, InjectionTimestepEmbedSequentialHolder,
                                 _forward_inject_BasicTransformerBlock, factory_forward_inject_UNetModel,
-                                REF_CONTROL_LIST_ALL)
+                                handle_context_ref_setup,
+                                REF_CONTROL_LIST_ALL, CONTEXTREF_CLEAN_FUNC)
 from .control_lllite import (ControlLLLiteAdvanced)
 from .utils import torch_dfs
 
 
 def support_sliding_context_windows(model, positive, negative) -> tuple[bool, dict, dict]:
-    if not hasattr(model, "motion_injection_params"):
-        return False, positive, negative
-    motion_injection_params = getattr(model, "motion_injection_params")
-    context_options = getattr(motion_injection_params, "context_options")
-    if context_options.context_length is None:
-        return False, positive, negative
     # convert to advanced, with report if anything was actually modified
     modified, new_conds = convert_all_to_advanced([positive, negative])
     positive, negative = new_conds
     return modified, positive, negative
+
+
+def has_sliding_context_windows(model):
+    motion_injection_params = getattr(model, "motion_injection_params", None)
+    if motion_injection_params is None:
+        return False
+    context_options = getattr(motion_injection_params, "context_options")
+    return context_options.context_length is not None
+
+
+def get_contextref_obj(model):
+    motion_injection_params = getattr(model, "motion_injection_params", None)
+    if motion_injection_params is None:
+        return None
+    context_options = getattr(motion_injection_params, "context_options")
+    extras = getattr(context_options, "extras", None)
+    if extras is None:
+        return None
+    return getattr(extras, "context_ref", None)
 
 
 def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
@@ -34,7 +48,7 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
         ref_set: set[ReferenceAdvanced] = set()
         if control is None:
             return ref_set
-        if type(control) == ReferenceAdvanced:
+        if type(control) == ReferenceAdvanced and not control.is_context_ref:
             control.order = order
             order -= 1
             ref_set.add(control)
@@ -59,13 +73,23 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
             # check if positive or negative conds contain ref cn
             positive = args[-3]
             negative = args[-2]
-            # if context options present, convert all CNs to Advanced if needed
-            controlnets_modified, positive, negative = support_sliding_context_windows(model, positive, negative)
-            if controlnets_modified:
-                args = list(args)
-                args[-3] = positive
-                args[-2] = negative
-                args = tuple(args)
+            # if context options present, perform some special actions that may be required
+            context_refs = []
+            if has_sliding_context_windows(model):
+                model.model_options = model.model_options.copy()
+                model.model_options["transformer_options"] = model.model_options["transformer_options"].copy()
+                # convert all CNs to Advanced if needed
+                controlnets_modified, positive, negative = support_sliding_context_windows(model, positive, negative)
+                if controlnets_modified:
+                    args = list(args)
+                    args[-3] = positive
+                    args[-2] = negative
+                    args = tuple(args)
+                # enable ContextRef, if requested
+                existing_contextref_obj = get_contextref_obj(model)
+                if existing_contextref_obj is not None:
+                    context_refs = handle_context_ref_setup(existing_contextref_obj, model.model_options["transformer_options"], positive, negative)
+                    controlnets_modified = True
             # look for Advanced ControlNets that will require intervention to work
             ref_set = set()
             lllite_dict: dict[ControlLLLiteAdvanced, None] = {} # dicts preserve insertion order since py3.7
@@ -88,7 +112,7 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                 for lll in lllite_list:
                     lll.live_model_patches(model.model_options)
             # if no ref cn found, do original function immediately
-            if len(ref_set) == 0:
+            if len(ref_set) == 0 and len(context_refs) == 0:
                 return orig_comfy_sample(model, *args, **kwargs)
             # otherwise, injection time
             try:
@@ -158,6 +182,7 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                 new_model_options["transformer_options"] = model.model_options["transformer_options"].copy()
                 ref_list: list[ReferenceAdvanced] = list(ref_set)
                 new_model_options["transformer_options"][REF_CONTROL_LIST_ALL] = sorted(ref_list, key=lambda x: x.order)
+                new_model_options["transformer_options"][CONTEXTREF_CLEAN_FUNC] = reference_injections.clean_contextref_module_mem
                 model.model_options = new_model_options
                 # continue with original function
                 return orig_comfy_sample(model, *args, **kwargs)
@@ -167,14 +192,14 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                 attn_modules: list[RefBasicTransformerBlock] = reference_injections.attn_modules
                 for module in attn_modules:
                     module.injection_holder.restore(module)
-                    module.injection_holder.clean()
+                    module.injection_holder.clean_all()
                     del module.injection_holder
                 del attn_modules
                 # restore gn modules
                 gn_modules: list[RefTimestepEmbedSequential] = reference_injections.gn_modules
                 for module in gn_modules:
                     module.injection_holder.restore(module)
-                    module.injection_holder.clean()
+                    module.injection_holder.clean_all()
                     del module.injection_holder
                 del gn_modules
                 # restore diffusion_model forward function

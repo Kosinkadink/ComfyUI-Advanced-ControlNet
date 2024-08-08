@@ -21,6 +21,10 @@ from .logger import logger
 BIGMIN = -(2**53-1)
 BIGMAX = (2**53-1)
 
+ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
+CONTROL_INIT_BY_ACN = "_control_init_by_ACN"
+
+
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
         # immediately restore load_torch_file to original version
@@ -35,7 +39,7 @@ def wrapper_len_factory(orig_len: Callable) -> Callable:
     def wrapper_len(*args, **kwargs):
         cond_or_uncond = args[0]
         real_length = orig_len(*args, **kwargs)
-        if real_length > 0 and type(cond_or_uncond) == list and (cond_or_uncond[0] in [0, 1]):
+        if real_length > 0 and type(cond_or_uncond) == list and isinstance(cond_or_uncond[0], int) and (cond_or_uncond[0] in [0, 1]):
             try:
                 to_return = IntWithCondOrUncond(real_length)
                 setattr(to_return, "cond_or_uncond", cond_or_uncond)
@@ -569,7 +573,8 @@ class AdvancedControlBase:
         self.full_latent_length = 0
         self.context_length = 0
         # timesteps
-        self.t: Tensor = None
+        self.t: float = None
+        self.prev_t: float = None
         self.batched_number: Union[int, IntWithCondOrUncond] = None
         self.batch_size: int = 0
         # weights + override
@@ -627,10 +632,11 @@ class AdvancedControlBase:
         self.weights = None
         self.latent_keyframes = None
 
-    def prepare_current_timestep(self, t: Tensor, batched_number: int):
+    def prepare_current_timestep(self, t: Tensor, batched_number: int=1):
         self.t = float(t[0])
-        self.batched_number = batched_number
-        self.batch_size = len(t)
+        # check if t has changed (otherwise do nothing, as step already accounted for)
+        if self.t == self.prev_t:
+            return
         # get current step percent
         curr_t: float = self.t
         prev_index = self._current_timestep_index
@@ -666,7 +672,8 @@ class AdvancedControlBase:
                     # if eval_tk is outside of percent range, stop looking further
                     else:
                         break
-        
+        # update prev_t
+        self.prev_t = self.t
         # update steps current keyframe is used
         self._current_used_steps += 1
         # if index changed, apply overrides
@@ -740,6 +747,8 @@ class AdvancedControlBase:
         return True
 
     def get_control_inject(self, x_noisy, t, cond, batched_number):
+        self.batched_number = batched_number
+        self.batch_size = len(t)
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
@@ -932,6 +941,7 @@ class AdvancedControlBase:
         self.full_latent_length = 0
         self.context_length = 0
         self.t = None
+        self.prev_t = None
         self.batched_number = None
         self.batch_size = 0
         self.weights = None

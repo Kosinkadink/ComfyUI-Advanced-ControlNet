@@ -16,11 +16,8 @@ from .control_lllite import LLLiteModule, LLLitePatch, load_controllllite
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
-                    broadcast_image_to_extend, extend_to_batch_size)
+                    broadcast_image_to_extend, extend_to_batch_size, ORIG_PREVIOUS_CONTROLNET, CONTROL_INIT_BY_ACN)
 from .logger import logger
-
-
-ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
 
 
 class ControlNetAdvanced(ControlNet, AdvancedControlBase):
@@ -574,7 +571,13 @@ def restore_all_controlnet_conns(conds: list[list[dict[str]]]):
         if main_cond is not None:
             for cond in main_cond:
                 if "control" in cond[1]:
-                    _restore_all_controlnet_conns(cond[1]["control"])
+                    # if ACN is the one to have initialized it, delete it
+                    # TODO: maybe check if someone else did a similar hack, and carefully pluck out our stuff?
+                    if CONTROL_INIT_BY_ACN in cond[1]:
+                        cond[1].pop("control")
+                        cond[1].pop(CONTROL_INIT_BY_ACN)
+                    else:
+                        _restore_all_controlnet_conns(cond[1]["control"])
 
 
 def _restore_all_controlnet_conns(input_object: ControlBase):
