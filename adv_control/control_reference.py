@@ -39,6 +39,7 @@ CONTEXTREF_MACHINE_STATE = "contextref_machine_state"
 CONTEXTREF_TEMP_COND_IDX = "contextref_temp_cond_idx"
 
 HIGHEST_VERSION_SUPPORT = 1
+RETURNED_CONTEXTREF_VERSION = 1
 
 
 class RefConst:
@@ -156,6 +157,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         # ContextRef stuff
         self.is_context_ref = False
         self.contextref_cond_idx = -1
+        self.contextref_version = RETURNED_CONTEXTREF_VERSION
 
     @property
     def ref_opts(self):
