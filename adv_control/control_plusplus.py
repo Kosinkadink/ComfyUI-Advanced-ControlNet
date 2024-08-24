@@ -323,8 +323,8 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
             if self.cond_hint[i] is not None:
                 if x_noisy.shape[0] != self.cond_hint[i].shape[0]:
                     self.cond_hint[i] = broadcast_image_to_extend(self.cond_hint[i], x_noisy.shape[0], batched_number)
-                    if self.cond_hint_types is not None:
-                        self.cond_hint_types = broadcast_image_to_extend(self.cond_hint_types, x_noisy.shape[0], batched_number)
+        if self.cond_hint_types is not None and x_noisy.shape[0] != self.cond_hint_types.shape[0]:
+            self.cond_hint_types = broadcast_image_to_extend(self.cond_hint_types, x_noisy.shape[0], batched_number, False)
         
         # prepare mask_cond_hint
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
