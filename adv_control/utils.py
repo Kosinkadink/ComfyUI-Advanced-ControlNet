@@ -157,14 +157,16 @@ class ControlWeightType:
 
 
 class ControlWeights:
-    def __init__(self, weight_type: str, base_multiplier: float=1.0, flip_weights: bool=False, weights: list[float]=None, weight_mask: Tensor=None,
+    def __init__(self, weight_type: str, base_multiplier: float=1.0,
+                 weights_input: list[float]=None, weights_middle: list[float]=None, weights_output: list[float]=None,
+                 weight_func: Callable=None, weight_mask: Tensor=None,
                  uncond_multiplier=1.0, uncond_mask: Tensor=None, extras: dict[str]={},):
         self.weight_type = weight_type
         self.base_multiplier = base_multiplier
-        self.flip_weights = flip_weights
-        self.weights = weights
-        if self.weights is not None and self.flip_weights:
-            self.weights.reverse()
+        self.weights_input = weights_input
+        self.weights_middle = weights_middle
+        self.weights_output = weights_output
+        self.weight_func = weight_func
         self.weight_mask = weight_mask
         self.uncond_multiplier = float(uncond_multiplier)
         self.has_uncond_multiplier = not math.isclose(self.uncond_multiplier, 1.0)
@@ -173,66 +175,74 @@ class ControlWeights:
         self.extras = extras
 
     def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
+        # if weight_func present, use it
+        if self.weight_func is not None:
+            return self.weight_func(idx=idx, control=control, key=key)
         # if weights is not none, return index
-        if self.weights is not None:
-            # support live calculation
-            if callable(self.weights):
-                return self.weights(idx=idx, control=control, key=key)
-            # if middle weight, need to pretend index is actually after all the output weights (if applicable)
-            if key == "middle" and "output" in control:
-                idx += len(control["output"])
+        relevant_weights = None
+        if key == "middle":
+            relevant_weights = self.weights_middle
+        elif key == "input":
+            relevant_weights = self.weights_input
+        else:
+            relevant_weights = self.weights_output
+        if relevant_weights is None:
+            return default
+        return relevant_weights[idx]
 
-            if key == "output":
-                # this implies weights list is not aligning with expectations - will need to adjust code
-                if idx >= len(self.weights)-1:
-                    return default
-            else:
-                # this implies weights list is not aligning with expectations - will need to adjust code
-                if idx >= len(self.weights):
-                    return default
-            return self.weights[idx]
-        return 1.0
-
-    def copy_with_new_weights(self, new_weights: list[float]):
-        return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier, flip_weights=self.flip_weights,
-                              weights=new_weights, weight_mask=self.weight_mask, uncond_multiplier=self.uncond_multiplier, extras=self.extras)
+    def copy_with_new_weights(self, new_weights_input: list[float]=None, new_weights_middle: list[float]=None, new_weights_output: list[float]=None,
+                              new_weight_func: Callable=None):
+        return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier,
+                              weights_input=new_weights_input, weights_middle=new_weights_middle, weights_output=new_weights_output,
+                              weight_func=new_weight_func, weight_mask=self.weight_mask,
+                              uncond_multiplier=self.uncond_multiplier, extras=self.extras)
 
     @classmethod
     def default(cls, extras: dict[str]={}):
         return cls(ControlWeightType.DEFAULT, extras=extras)
 
     @classmethod
-    def universal(cls, base_multiplier: float, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def universal(cls, base_multiplier: float, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
     def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0, extras: dict[str]={}):
         return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            weights = [1.0]*12
-        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        if weights_input is None:
+            weights_input = [1.0]*12
+        return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            weights = [1.0]*13
-        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        if weights_output is None:
+            weights_output = [1.0]*12
+        if weights_middle is None:
+            weights_middle = [1.0]*1
+        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllora(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            weights = [1.0]*10
-        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        if weights_output is None:
+            weights_output = [1.0]*10
+        if weights_middle is None:
+            weights_middle = [1.0]*10
+        if weights_input is None:
+            weights_input = [1.0]*10
+        return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            # TODO: make this have a real value
-            weights = [1.0]*200
-        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        # TODO: make the lenghts make sense
+        if weights_output is None:
+            weights_output = [1.0]*200
+        if weights_middle is None:
+            weights_middle = [1.0]*200
+        if weights_input is None:
+            weights_input = [1.0]*200
+        return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
 
 
 class StrengthInterpolation:
@@ -778,11 +788,14 @@ class AdvancedControlBase:
         return self.weights.get(idx=idx, control=control, key=key)
     
     def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
-        c_len = len(control[key])-1
-        if key == "output":
-            if "middle" in control:
-                c_len += len(control["middle"])
-        return c_len-idx
+        if key == "middle":
+            return 0
+        else:
+            c_len = len(control[key])
+            real_idx = c_len-idx
+            if key == "input":
+                real_idx = c_len - real_idx + 1
+            return real_idx
 
     def calc_latent_keyframe_mults(self, x: Tensor, batched_number: int) -> Tensor:
         # apply strengths, and get batch indeces to null out
@@ -916,7 +929,7 @@ class AdvancedControlBase:
                 del out_mask
                 # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
                 # resize mask and match batch count
-                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier)
+                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier, match_shape=True)
                 actual_latent_length = x_noisy.shape[0] // batched_number
                 out_mask = extend_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
                 if self.sub_idxs is not None:

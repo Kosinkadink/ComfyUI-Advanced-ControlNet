@@ -237,9 +237,16 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
         self.single_control_type: str = None
 
     def get_universal_weights(self) -> ControlWeights:
-        # TODO: match actual layer count of model
-        raw_weights = [(self.weights.base_multiplier ** float(12 - i)) for i in range(13)]
-        return self.weights.copy_with_new_weights(raw_weights)
+        def cn_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
+            if key == "middle":
+                return 1.0
+            c_len = len(control[key])
+            raw_weights = [(self.weights.base_multiplier ** float((c_len) - i)) for i in range(c_len+1)]
+            raw_weights = raw_weights[:-1]
+            if key == "input":
+                raw_weights.reverse()
+            return raw_weights[idx]
+        return self.weights.copy_with_new_weights(new_weight_func=cn_weights_func)
 
     def verify_control_type(self, model_name: str, pp_group: PlusPlusInputGroup=None):
         if pp_group is not None:

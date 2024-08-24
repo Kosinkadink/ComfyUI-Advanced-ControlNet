@@ -66,7 +66,7 @@ class ScaledSoftMaskedUniversalWeights:
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
-class ScaledSoftUniversalWeights:
+class ScaledSoftUniversalWeightsDeprecated:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -88,11 +88,11 @@ class ScaledSoftUniversalWeights:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
 
     def load_weights(self, base_multiplier, flip_weights, uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
-        weights = ControlWeights.universal(base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
-        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights))) 
+        weights = ControlWeights.universal(base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
-class SoftControlNetWeights:
+class SoftControlNetWeightsDeprecated:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -128,13 +128,14 @@ class SoftControlNetWeights:
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                      weight_07, weight_08, weight_09, weight_10, weight_11, weight_12, flip_weights,
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
-        weights = [weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
-                   weight_07, weight_08, weight_09, weight_10, weight_11, weight_12]
-        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        weights_output = [weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
+                   weight_07, weight_08, weight_09, weight_10, weight_11]
+        weights_middle = [weight_12]
+        weights = ControlWeights.controlnet(weights_output=weights_output, weights_middle=weights_middle, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
-class CustomControlNetWeights:
+class CustomControlNetWeightsDeprecated:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -170,13 +171,14 @@ class CustomControlNetWeights:
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                      weight_07, weight_08, weight_09, weight_10, weight_11, weight_12, flip_weights,
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
-        weights = [weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
-                   weight_07, weight_08, weight_09, weight_10, weight_11, weight_12]
-        weights = ControlWeights.controlnet(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        weights_output = [weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
+                   weight_07, weight_08, weight_09, weight_10, weight_11]
+        weights_middle = [weight_12]
+        weights = ControlWeights.controlnet(weights_output=weights_output, weights_middle=weights_middle, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
-class SoftT2IAdapterWeights:
+class SoftT2IAdapterWeightsDeprecated:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -205,11 +207,11 @@ class SoftT2IAdapterWeights:
         weights = [weight_00, weight_01, weight_02, weight_03]
         weights = get_properly_arranged_t2i_weights(weights)
         weights.reverse()  # to account for recent ComfyUI changes
-        weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        weights = ControlWeights.t2iadapter(weights_input=weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
-class CustomT2IAdapterWeights:
+class CustomT2IAdapterWeightsDeprecated:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -238,5 +240,5 @@ class CustomT2IAdapterWeights:
         weights = [weight_00, weight_01, weight_02, weight_03]
         weights = get_properly_arranged_t2i_weights(weights)
         weights.reverse()  # to account for recent ComfyUI changes
-        weights = ControlWeights.t2iadapter(weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        weights = ControlWeights.t2iadapter(weights_input=weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))

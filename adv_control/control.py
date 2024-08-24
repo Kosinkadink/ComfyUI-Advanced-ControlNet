@@ -26,8 +26,16 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
 
     def get_universal_weights(self) -> ControlWeights:
-        raw_weights = [(self.weights.base_multiplier ** float(12 - i)) for i in range(13)]
-        return self.weights.copy_with_new_weights(raw_weights)
+        def cn_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
+            if key == "middle":
+                return 1.0
+            c_len = len(control[key])
+            raw_weights = [(self.weights.base_multiplier ** float((c_len) - i)) for i in range(c_len+1)]
+            raw_weights = raw_weights[:-1]
+            if key == "input":
+                raw_weights.reverse()
+            return raw_weights[idx]
+        return self.weights.copy_with_new_weights(new_weight_func=cn_weights_func)
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):
         # perform special version of get_control that supports sliding context and masks
@@ -127,18 +135,28 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
         return AdvancedControlBase.control_merge_inject(self, control, control_prev, output_dtype)
 
     def get_universal_weights(self) -> ControlWeights:
-        raw_weights = [(self.weights.base_multiplier ** float(7 - i)) for i in range(8)]
-        raw_weights = [raw_weights[-8], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
-        raw_weights = get_properly_arranged_t2i_weights(raw_weights)
-        raw_weights.reverse()  # need to reverse to match recent ComfyUI changes
-        return self.weights.copy_with_new_weights(raw_weights)
+        def t2i_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
+            if key == "middle":
+                return 1.0
+            c_len = 8 #len(control[key])
+            raw_weights = [(self.weights.base_multiplier ** float((c_len-1) - i)) for i in range(c_len)]
+            raw_weights = [raw_weights[-c_len], raw_weights[-3], raw_weights[-2], raw_weights[-1]]
+            raw_weights = get_properly_arranged_t2i_weights(raw_weights)
+            if key == "input":
+                raw_weights.reverse()
+            return raw_weights[idx]
+        return self.weights.copy_with_new_weights(new_weight_func=t2i_weights_func)
 
     def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
+        if key == "middle":
+            return 0
         # match how T2IAdapterAdvanced deals with universal weights
-        indeces = [7 - i for i in range(8)]
-        indeces = [indeces[-8], indeces[-3], indeces[-2], indeces[-1]]
+        c_len = 8 #len(control[key])
+        indeces = [(c_len-1) - i for i in range(c_len)]
+        indeces = [indeces[-c_len], indeces[-3], indeces[-2], indeces[-1]]
         indeces = get_properly_arranged_t2i_weights(indeces)
-        indeces.reverse()  # need to reverse to match recent ComfyUI changes
+        if key == "input":
+            indeces.reverse()  # need to reverse to match recent ComfyUI changes
         return indeces[idx]
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number):

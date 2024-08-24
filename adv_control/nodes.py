@@ -7,8 +7,8 @@ from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
 from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper, BIGMAX
-from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights, SoftControlNetWeights, CustomControlNetWeights,
-    SoftT2IAdapterWeights, CustomT2IAdapterWeights)
+from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeightsDeprecated, SoftControlNetWeightsDeprecated, CustomControlNetWeightsDeprecated,
+    SoftT2IAdapterWeightsDeprecated, CustomT2IAdapterWeightsDeprecated)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
                               TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
@@ -200,12 +200,12 @@ NODE_CLASS_MAPPINGS = {
     "ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
     "DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
     # Weights
-    "ScaledSoftControlNetWeights": ScaledSoftUniversalWeights,
+    "ScaledSoftControlNetWeights": ScaledSoftUniversalWeightsDeprecated,
     "ScaledSoftMaskedUniversalWeights": ScaledSoftMaskedUniversalWeights,
-    "SoftControlNetWeights": SoftControlNetWeights,
-    "CustomControlNetWeights": CustomControlNetWeights,
-    "SoftT2IAdapterWeights": SoftT2IAdapterWeights,
-    "CustomT2IAdapterWeights": CustomT2IAdapterWeights,
+    "SoftControlNetWeights": SoftControlNetWeightsDeprecated,
+    "CustomControlNetWeights": CustomControlNetWeightsDeprecated,
+    "SoftT2IAdapterWeights": SoftT2IAdapterWeightsDeprecated,
+    "CustomT2IAdapterWeights": CustomT2IAdapterWeightsDeprecated,
     "ACN_DefaultUniversalWeights": DefaultWeights,
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": RgbSparseCtrlPreprocessor,
