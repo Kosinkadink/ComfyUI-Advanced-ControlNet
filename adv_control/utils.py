@@ -175,6 +175,9 @@ class ControlWeights:
     def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
         # if weights is not none, return index
         if self.weights is not None:
+            # support live calculation
+            if callable(self.weights):
+                return self.weights(idx=idx, control=control, key=key)
             # if middle weight, need to pretend index is actually after all the output weights (if applicable)
             if key == "middle" and "output" in control:
                 idx += len(control["output"])

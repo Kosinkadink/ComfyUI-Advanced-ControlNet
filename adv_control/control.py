@@ -8,7 +8,7 @@ import comfy.utils
 import comfy.model_management
 import comfy.model_detection
 import comfy.controlnet as comfy_cn
-from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter
+from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, StrengthType
 from comfy.model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseModelPatcher, SparseControlNet, SparseCtrlMotionWrapper, SparseSettings, SparseConst
@@ -21,7 +21,7 @@ from .logger import logger
 
 
 class ControlNetAdvanced(ControlNet, AdvancedControlBase):
-    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, device=None, load_device=None, manual_cast_dtype=None):
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, device=None, load_device=None, manual_cast_dtype=None, extra_conds=["y"], strength_type=StrengthType.CONSTANT):
         super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, compression_ratio=compression_ratio, latent_format=latent_format, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
 
@@ -64,9 +64,9 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 actual_cond_hint_orig = self.cond_hint_original
                 if self.cond_hint_original.size(0) < self.full_latent_length:
                     actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
-                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, 'nearest-exact', "center")
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, self.upscale_algorithm, "center")
             else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, 'nearest-exact', "center")
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, self.upscale_algorithm, "center")
             if self.vae is not None:
                 loaded_models = comfy.model_management.loaded_models(only_currently_used=True)
                 self.cond_hint = self.vae.encode(self.cond_hint.movedim(1, -1))
@@ -81,17 +81,22 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number, dtype=dtype)
 
         context = cond.get('crossattn_controlnet', cond['c_crossattn'])
-        y = cond.get('y', None)
-        if y is not None:
-            y = y.to(dtype)
+        extra = self.extra_args.copy()
+        for c in self.extra_conds:
+            temp = cond.get(c, None)
+            if temp is not None:
+                extra[c] = temp.to(dtype)
+
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
 
-        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
+        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.to(dtype), context=context.to(dtype), **extra)
         return self.control_merge(control, control_prev, output_dtype)
 
     def copy(self):
         c = ControlNetAdvanced(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
+        c.control_model = self.control_model
+        c.control_model_wrapped = self.control_model_wrapped
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
@@ -99,7 +104,8 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
     @staticmethod
     def from_vanilla(v: ControlNet, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlNetAdvanced':
         to_return = ControlNetAdvanced(control_model=v.control_model, timestep_keyframes=timestep_keyframe,
-                                  global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, device=v.device, load_device=v.load_device, manual_cast_dtype=v.manual_cast_dtype)
+                                  global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, device=v.device, load_device=v.load_device,
+                                  manual_cast_dtype=v.manual_cast_dtype)
         v.copy_to(to_return)
         return to_return
 

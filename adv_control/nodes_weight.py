@@ -42,7 +42,7 @@ class ScaledSoftMaskedUniversalWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 75}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -77,7 +77,7 @@ class ScaledSoftUniversalWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 20}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -115,7 +115,7 @@ class SoftControlNetWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 50}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -157,7 +157,7 @@ class CustomControlNetWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 65}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -190,7 +190,7 @@ class SoftT2IAdapterWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 55}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -223,7 +223,7 @@ class CustomT2IAdapterWeights:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 65}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
