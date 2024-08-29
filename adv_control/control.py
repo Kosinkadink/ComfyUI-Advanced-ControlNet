@@ -24,6 +24,8 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
     def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, device=None, load_device=None, manual_cast_dtype=None, extra_conds=["y"], strength_type=StrengthType.CONSTANT):
         super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, compression_ratio=compression_ratio, latent_format=latent_format, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
+        self.is_flux = False
+        self.x_noisy_shape = None
 
     def get_universal_weights(self) -> ControlWeights:
         def cn_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
@@ -97,9 +99,18 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
-
+        self.x_noisy_shape = x_noisy.shape
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.to(dtype), context=context.to(dtype), **extra)
         return self.control_merge(control, control_prev, output_dtype)
+
+    def pre_run_advanced(self, *args, **kwargs):
+        self.is_flux = "Flux" in str(type(self.control_model).__name__)
+        return super().pre_run_advanced(*args, **kwargs)
+
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, is_flux=False):
+        if self.is_flux:
+            flux_shape = self.x_noisy_shape
+        return super().apply_advanced_strengths_and_masks(x, batched_number, flux_shape)
 
     def copy(self):
         c = ControlNetAdvanced(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
@@ -109,6 +120,10 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         self.copy_to_advanced(c)
         return c
     
+    def cleanup_advanced(self):
+        self.x_noisy_shape = None
+        return super().cleanup_advanced()
+
     @staticmethod
     def from_vanilla(v: ControlNet, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlNetAdvanced':
         to_return = ControlNetAdvanced(control_model=v.control_model, timestep_keyframes=timestep_keyframe,
@@ -405,11 +420,11 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
         return self.control_merge(control, control_prev, output_dtype)
 
-    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, *args, **kwargs):
         # apply mults to indexes with and without a direct condhint
         x[self.local_sparse_idxs] *= self.sparse_settings.sparse_hint_mult * self.weights.extras.get(SparseConst.HINT_MULT, 1.0)
         x[self.local_sparse_idxs_inverse] *= self.sparse_settings.sparse_nonhint_mult * self.weights.extras.get(SparseConst.NONHINT_MULT, 1.0)
-        return super().apply_advanced_strengths_and_masks(x, batched_number)
+        return super().apply_advanced_strengths_and_masks(x, batched_number, *args, **kwargs)
 
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)

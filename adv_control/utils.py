@@ -3,6 +3,7 @@ from typing import Callable, Union
 import torch
 from torch import Tensor
 import torch.nn.functional
+from einops import rearrange
 import numpy as np
 import math
 
@@ -447,14 +448,19 @@ class manual_cast_clean_groupnorm(comfy.ops.manual_cast):
 
 
 # adapted from comfy/sample.py
-def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False, match_shape=False):
+def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False, match_shape=False, flux_shape=None):
     mask = mask.clone()
-    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[-2]*multiplier, shape[-1]*multiplier), mode="bilinear")
+    if flux_shape is not None:
+        multiplier = multiplier * 0.5
+        mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(round(flux_shape[-2]*multiplier), round(flux_shape[-1]*multiplier)), mode="bilinear")
+        mask = rearrange(mask, "b c h w -> b (h w) c")
+    else:
+        mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(round(shape[-2]*multiplier), round(shape[-1]*multiplier)), mode="bilinear")
     if match_dim1:
         if match_shape and len(shape) < 4:
             raise Exception(f"match_dim1 cannot be True if shape is under 4 dims; was {len(shape)}.")
         mask = torch.cat([mask] * shape[1], dim=1)
-    if match_shape and len(shape) == 3:
+    if match_shape and len(shape) == 3 and len(mask.shape) != 3:
         mask = mask.squeeze(1)
     return mask
 
@@ -845,7 +851,7 @@ class AdvancedControlBase:
             final_tensor = final_tensor.unsqueeze(-1)
         return final_tensor
 
-    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, flux_shape: tuple=None):
         # handle weight's uncond_multiplier, if applicable
         if self.weights.has_uncond_multiplier:
             cond_or_uncond = self.batched_number.cond_or_uncond
@@ -861,10 +867,10 @@ class AdvancedControlBase:
             x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.mask_cond_hint, x.shape, match_shape=True)
+            masks = prepare_mask_batch(self.mask_cond_hint, x.shape, match_shape=True, flux_shape=flux_shape)
             x[:] = x[:] * masks
         if self.tk_mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape, match_shape=True)
+            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape, match_shape=True, flux_shape=flux_shape)
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
         if self._current_timestep_keyframe.strength != 1.0:
