@@ -184,7 +184,7 @@ class ControlWeights:
         if key == "middle":
             relevant_weights = self.weights_middle
         elif key == "input":
-            relevant_weights = self.weights_input
+            relevant_weights = list(reversed(self.weights_input))
         else:
             relevant_weights = self.weights_output
         if relevant_weights is None:
