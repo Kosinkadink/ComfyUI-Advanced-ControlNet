@@ -59,7 +59,6 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         if self.manual_cast_dtype is not None:
             dtype = self.manual_cast_dtype
 
-        output_dtype = x_noisy.dtype
         # make cond_hint appropriate dimensions
         # TODO: change this to not require cond_hint upscaling every step when self.sub_idxs are present
         if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * self.compression_ratio != self.cond_hint.shape[2] or x_noisy.shape[3] * self.compression_ratio != self.cond_hint.shape[3]:
@@ -101,7 +100,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
         self.x_noisy_shape = x_noisy.shape
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.to(dtype), context=context.to(dtype), **extra)
-        return self.control_merge(control, control_prev, output_dtype)
+        return self.control_merge(control, control_prev, output_dtype=None)
 
     def pre_run_advanced(self, *args, **kwargs):
         self.is_flux = "Flux" in str(type(self.control_model).__name__)

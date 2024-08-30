@@ -878,7 +878,7 @@ class AdvancedControlBase:
                         self.apply_advanced_strengths_and_masks(x, self.batched_number)
                         x *= self.strength * self.calc_weight(i, x, control, key)
 
-                    if x.dtype != output_dtype:
+                    if output_dtype is not None and x.dtype != output_dtype:
                         x = x.to(output_dtype)
 
                 out[key].append(x)
