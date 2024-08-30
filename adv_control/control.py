@@ -107,7 +107,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         self.is_flux = "Flux" in str(type(self.control_model).__name__)
         return super().pre_run_advanced(*args, **kwargs)
 
-    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, is_flux=False):
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, flux_shape=None):
         if self.is_flux:
             flux_shape = self.x_noisy_shape
         return super().apply_advanced_strengths_and_masks(x, batched_number, flux_shape)
