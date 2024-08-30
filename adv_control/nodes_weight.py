@@ -127,11 +127,12 @@ class SoftControlNetWeightsSD15:
     def load_weights(self, output_0, output_1, output_2, output_3, output_4, output_5, output_6, 
                      output_7, output_8, output_9, output_10, output_11, middle_0,
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
-        weights_output = [output_0, output_1, output_2, output_3, output_4, output_5, output_6,
-                          output_7, output_8, output_9, output_10, output_11]
-        weights_middle = [middle_0]
-        weights = ControlWeights.controlnet(weights_output=weights_output, weights_middle=weights_middle, uncond_multiplier=uncond_multiplier, extras=cn_extras)
-        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
+        return CustomControlNetWeightsSD15.load_weights(self,
+                                                        output_0=output_0, output_1=output_1, output_2=output_2, output_3=output_3,
+                                                        output_4=output_4, output_5=output_5, output_6=output_6, output_7=output_7,
+                                                        output_8=output_8, output_9=output_9, output_10=output_10, output_11=output_11,
+                                                        middle_0=middle_0,
+                                                        uncond_multiplier=uncond_multiplier, cn_extras=cn_extras)
 
 
 class CustomControlNetWeightsSD15:
@@ -201,10 +202,8 @@ class SoftT2IAdapterWeights:
 
     def load_weights(self, input_0, input_1, input_2, input_3,
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
-        weights = [input_0, input_1, input_2, input_3]
-        weights = get_properly_arranged_t2i_weights(weights)
-        weights = ControlWeights.t2iadapter(weights_input=weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
-        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
+        return CustomT2IAdapterWeights.load_weights(self, input_0=input_0, input_1=input_1, input_2=input_2, input_3=input_3,
+                                                    uncond_multiplier=uncond_multiplier, cn_extras=cn_extras)
 
 
 class CustomT2IAdapterWeights:
