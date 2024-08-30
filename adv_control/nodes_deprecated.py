@@ -71,6 +71,32 @@ class LoadImagesFromDirectory:
         return (torch.cat(images, dim=0), torch.stack(masks, dim=0), image_count)
 
 
+class ScaledSoftUniversalWeightsDeprecated:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 1.0, "step": 0.001}, ),
+                "flip_weights": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            }
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
+    FUNCTION = "load_weights"
+
+    CATEGORY = ""
+
+    def load_weights(self, base_multiplier, flip_weights, uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
+        weights = ControlWeights.universal(base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
+
+
 class SoftControlNetWeightsDeprecated:
     @classmethod
     def INPUT_TYPES(s):
@@ -157,7 +183,6 @@ class CustomControlNetWeightsDeprecated:
         weights_middle = [weight_12]
         weights = ControlWeights.controlnet(weights_output=weights_output, weights_middle=weights_middle, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
-
 
 
 class SoftT2IAdapterWeightsDeprecated:

@@ -66,13 +66,12 @@ class ScaledSoftMaskedUniversalWeights:
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
-class ScaledSoftUniversalWeightsDeprecated:
+class ScaledSoftUniversalWeights:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
                 "base_multiplier": ("FLOAT", {"default": 0.825, "min": 0.0, "max": 1.0, "step": 0.001}, ),
-                "flip_weights": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
@@ -87,7 +86,7 @@ class ScaledSoftUniversalWeightsDeprecated:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights"
 
-    def load_weights(self, base_multiplier, flip_weights, uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
+    def load_weights(self, base_multiplier, uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
         weights = ControlWeights.universal(base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 

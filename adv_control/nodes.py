@@ -7,7 +7,7 @@ from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
 from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper, BIGMAX
-from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeightsDeprecated,
+from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights,
                            SoftControlNetWeightsSD15, CustomControlNetWeightsSD15, CustomControlNetWeightsFlux,
                            SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
@@ -16,7 +16,8 @@ from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAd
 from .nodes_reference import ReferenceControlNetNode, ReferenceControlFinetune, ReferencePreprocessorNode
 from .nodes_plusplus import PlusPlusLoaderAdvanced, PlusPlusLoaderSingle, PlusPlusInputNode
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
-from .nodes_deprecated import (LoadImagesFromDirectory, SoftControlNetWeightsDeprecated, CustomControlNetWeightsDeprecated, 
+from .nodes_deprecated import (LoadImagesFromDirectory, ScaledSoftUniversalWeightsDeprecated,
+                               SoftControlNetWeightsDeprecated, CustomControlNetWeightsDeprecated, 
                                SoftT2IAdapterWeightsDeprecated, CustomT2IAdapterWeightsDeprecated)
 from .logger import logger
 
@@ -245,7 +246,7 @@ NODE_CLASS_MAPPINGS = {
     "ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
     "DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
     # Weights
-    "ScaledSoftControlNetWeights": ScaledSoftUniversalWeightsDeprecated,
+    "ACN_ScaledSoftControlNetWeights": ScaledSoftUniversalWeights,
     "ScaledSoftMaskedUniversalWeights": ScaledSoftMaskedUniversalWeights,
     "ACN_SoftControlNetWeightsSD15": SoftControlNetWeightsSD15,
     "ACN_CustomControlNetWeightsSD15": CustomControlNetWeightsSD15,
@@ -272,6 +273,7 @@ NODE_CLASS_MAPPINGS = {
     #"ACN_ControlNetLoaderWithLoraAdvanced": ControlNetLoaderWithLoraAdvanced,
     # Deprecated
     "LoadImagesFromDirectory": LoadImagesFromDirectory,
+    "ScaledSoftControlNetWeights": ScaledSoftUniversalWeightsDeprecated,
     "SoftControlNetWeights": SoftControlNetWeightsDeprecated,
     "CustomControlNetWeights": CustomControlNetWeightsDeprecated,
     "SoftT2IAdapterWeights": SoftT2IAdapterWeightsDeprecated,
@@ -294,7 +296,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ControlNetLoaderAdvanced": "Load Advanced ControlNet Model 🛂🅐🅒🅝",
     "DiffControlNetLoaderAdvanced": "Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝",
     # Weights
-    "ScaledSoftControlNetWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
+    "ACN_ScaledSoftControlNetWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
     "ScaledSoftMaskedUniversalWeights": "Scaled Soft Masked Weights 🛂🅐🅒🅝",
     "ACN_SoftControlNetWeightsSD15": "ControlNet Soft Weights [SD1.5] 🛂🅐🅒🅝",
     "ACN_CustomControlNetWeightsSD15": "ControlNet Custom Weights [SD1.5] 🛂🅐🅒🅝",
@@ -321,6 +323,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     #"ACN_ControlNetLoaderWithLoraAdvanced": "Load Adv. ControlNet Model w/ LoRA 🛂🅐🅒🅝",
     # Deprecated
     "LoadImagesFromDirectory": "🚫Load Images [DEPRECATED] 🛂🅐🅒🅝",
+    "ScaledSoftControlNetWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
     "SoftControlNetWeights": "ControlNet Soft Weights 🛂🅐🅒🅝",
     "CustomControlNetWeights": "ControlNet Custom Weights 🛂🅐🅒🅝",
     "SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
