@@ -184,10 +184,14 @@ class ControlWeights:
         if key == "middle":
             relevant_weights = self.weights_middle
         elif key == "input":
-            relevant_weights = list(reversed(self.weights_input))
+            relevant_weights = self.weights_input
+            if relevant_weights is not None:
+                relevant_weights = list(reversed(relevant_weights))
         else:
             relevant_weights = self.weights_output
         if relevant_weights is None:
+            return default
+        elif idx >= len(relevant_weights):
             return default
         return relevant_weights[idx]
 
@@ -212,37 +216,18 @@ class ControlWeights:
 
     @classmethod
     def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights_input is None:
-            weights_input = [1.0]*12
         return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights_output is None:
-            weights_output = [1.0]*12
-        if weights_middle is None:
-            weights_middle = [1.0]*1
-        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
     def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights_output is None:
-            weights_output = [1.0]*10
-        if weights_middle is None:
-            weights_middle = [1.0]*10
-        if weights_input is None:
-            weights_input = [1.0]*10
         return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
     def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        # TODO: make the lenghts make sense
-        if weights_output is None:
-            weights_output = [1.0]*200
-        if weights_middle is None:
-            weights_middle = [1.0]*200
-        if weights_input is None:
-            weights_input = [1.0]*200
         return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
 
 

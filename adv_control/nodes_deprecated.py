@@ -103,7 +103,7 @@ class SoftControlNetWeightsDeprecated:
     RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
     FUNCTION = "load_weights"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
+    CATEGORY = ""
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                      weight_07, weight_08, weight_09, weight_10, weight_11, weight_12, flip_weights,
@@ -147,7 +147,7 @@ class CustomControlNetWeightsDeprecated:
     RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
     FUNCTION = "load_weights"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
+    CATEGORY = ""
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, weight_04, weight_05, weight_06, 
                      weight_07, weight_08, weight_09, weight_10, weight_11, weight_12, flip_weights,
@@ -183,7 +183,7 @@ class SoftT2IAdapterWeightsDeprecated:
     RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
     FUNCTION = "load_weights"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/T2IAdapter"
+    CATEGORY = ""
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, flip_weights,
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
@@ -216,7 +216,7 @@ class CustomT2IAdapterWeightsDeprecated:
     RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
     FUNCTION = "load_weights"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/T2IAdapter"
+    CATEGORY = ""
 
     def load_weights(self, weight_00, weight_01, weight_02, weight_03, flip_weights,
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):

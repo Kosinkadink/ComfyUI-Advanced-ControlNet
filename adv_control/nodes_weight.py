@@ -177,6 +177,55 @@ class CustomControlNetWeightsSD15:
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
+class CustomControlNetWeightsFlux:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "input_0": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_4": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_5": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_6": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_7": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_8": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_9": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_10": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_11": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_12": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_13": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_14": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_15": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_16": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_17": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+                "input_18": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
+            },
+            "optional": {
+                "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            }
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
+    FUNCTION = "load_weights"
+
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
+
+    def load_weights(self, input_0, input_1, input_2, input_3, input_4, input_5, input_6, 
+                     input_7, input_8, input_9, input_10, input_11, input_12, input_13,
+                     input_14, input_15, input_16, input_17, input_18,
+                     uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
+        weights_input = [input_0, input_1, input_2, input_3, input_4, input_5,
+                         input_6, input_7, input_8, input_9, input_10, input_11,
+                         input_12, input_13, input_14, input_15, input_16, input_17, input_18]
+        weights = ControlWeights.controlnet(weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
+
+
 class SoftT2IAdapterWeights:
     @classmethod
     def INPUT_TYPES(s):

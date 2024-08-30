@@ -8,7 +8,8 @@ from comfy.model_patcher import ModelPatcher
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
 from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper, BIGMAX
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeightsDeprecated,
-                           SoftControlNetWeightsSD15, CustomControlNetWeightsSD15, SoftT2IAdapterWeights, CustomT2IAdapterWeights)
+                           SoftControlNetWeightsSD15, CustomControlNetWeightsSD15, CustomControlNetWeightsFlux,
+                           SoftT2IAdapterWeights, CustomT2IAdapterWeights)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
                               TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
@@ -248,6 +249,7 @@ NODE_CLASS_MAPPINGS = {
     "ScaledSoftMaskedUniversalWeights": ScaledSoftMaskedUniversalWeights,
     "ACN_SoftControlNetWeightsSD15": SoftControlNetWeightsSD15,
     "ACN_CustomControlNetWeightsSD15": CustomControlNetWeightsSD15,
+    "ACN_CustomControlNetWeightsFlux": CustomControlNetWeightsFlux,
     "ACN_SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "ACN_CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
@@ -296,6 +298,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ScaledSoftMaskedUniversalWeights": "Scaled Soft Masked Weights 🛂🅐🅒🅝",
     "ACN_SoftControlNetWeightsSD15": "ControlNet Soft Weights [SD1.5] 🛂🅐🅒🅝",
     "ACN_CustomControlNetWeightsSD15": "ControlNet Custom Weights [SD1.5] 🛂🅐🅒🅝",
+    "ACN_CustomControlNetWeightsFlux": "ControlNet Custom Weights [Flux] 🛂🅐🅒🅝",
     "ACN_SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "ACN_CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Default Weights 🛂🅐🅒🅝",
