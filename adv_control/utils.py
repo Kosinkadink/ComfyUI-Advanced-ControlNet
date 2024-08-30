@@ -3,6 +3,7 @@ from typing import Callable, Union
 import torch
 from torch import Tensor
 import torch.nn.functional
+from einops import rearrange
 import numpy as np
 import math
 
@@ -157,14 +158,16 @@ class ControlWeightType:
 
 
 class ControlWeights:
-    def __init__(self, weight_type: str, base_multiplier: float=1.0, flip_weights: bool=False, weights: list[float]=None, weight_mask: Tensor=None,
+    def __init__(self, weight_type: str, base_multiplier: float=1.0,
+                 weights_input: list[float]=None, weights_middle: list[float]=None, weights_output: list[float]=None,
+                 weight_func: Callable=None, weight_mask: Tensor=None,
                  uncond_multiplier=1.0, uncond_mask: Tensor=None, extras: dict[str]={},):
         self.weight_type = weight_type
         self.base_multiplier = base_multiplier
-        self.flip_weights = flip_weights
-        self.weights = weights
-        if self.weights is not None and self.flip_weights:
-            self.weights.reverse()
+        self.weights_input = weights_input
+        self.weights_middle = weights_middle
+        self.weights_output = weights_output
+        self.weight_func = weight_func
         self.weight_mask = weight_mask
         self.uncond_multiplier = float(uncond_multiplier)
         self.has_uncond_multiplier = not math.isclose(self.uncond_multiplier, 1.0)
@@ -173,63 +176,59 @@ class ControlWeights:
         self.extras = extras
 
     def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
+        # if weight_func present, use it
+        if self.weight_func is not None:
+            return self.weight_func(idx=idx, control=control, key=key)
         # if weights is not none, return index
-        if self.weights is not None:
-            # if middle weight, need to pretend index is actually after all the output weights (if applicable)
-            if key == "middle" and "output" in control:
-                idx += len(control["output"])
+        relevant_weights = None
+        if key == "middle":
+            relevant_weights = self.weights_middle
+        elif key == "input":
+            relevant_weights = self.weights_input
+            if relevant_weights is not None:
+                relevant_weights = list(reversed(relevant_weights))
+        else:
+            relevant_weights = self.weights_output
+        if relevant_weights is None:
+            return default
+        elif idx >= len(relevant_weights):
+            return default
+        return relevant_weights[idx]
 
-            if key == "output":
-                # this implies weights list is not aligning with expectations - will need to adjust code
-                if idx >= len(self.weights)-1:
-                    return default
-            else:
-                # this implies weights list is not aligning with expectations - will need to adjust code
-                if idx >= len(self.weights):
-                    return default
-            return self.weights[idx]
-        return 1.0
-
-    def copy_with_new_weights(self, new_weights: list[float]):
-        return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier, flip_weights=self.flip_weights,
-                              weights=new_weights, weight_mask=self.weight_mask, uncond_multiplier=self.uncond_multiplier, extras=self.extras)
+    def copy_with_new_weights(self, new_weights_input: list[float]=None, new_weights_middle: list[float]=None, new_weights_output: list[float]=None,
+                              new_weight_func: Callable=None):
+        return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier,
+                              weights_input=new_weights_input, weights_middle=new_weights_middle, weights_output=new_weights_output,
+                              weight_func=new_weight_func, weight_mask=self.weight_mask,
+                              uncond_multiplier=self.uncond_multiplier, extras=self.extras)
 
     @classmethod
     def default(cls, extras: dict[str]={}):
         return cls(ControlWeightType.DEFAULT, extras=extras)
 
     @classmethod
-    def universal(cls, base_multiplier: float, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def universal(cls, base_multiplier: float, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
     def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0, extras: dict[str]={}):
         return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def t2iadapter(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            weights = [1.0]*12
-        return cls(ControlWeightType.T2IADAPTER, weights=weights,flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
 
     @classmethod
-    def controlnet(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            weights = [1.0]*13
-        return cls(ControlWeightType.CONTROLNET, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllora(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            weights = [1.0]*10
-        return cls(ControlWeightType.CONTROLLORA, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
     
     @classmethod
-    def controllllite(cls, weights: list[float]=None, flip_weights: bool=False, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        if weights is None:
-            # TODO: make this have a real value
-            weights = [1.0]*200
-        return cls(ControlWeightType.CONTROLLLLITE, weights=weights, flip_weights=flip_weights, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
+        return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
 
 
 class StrengthInterpolation:
@@ -434,14 +433,19 @@ class manual_cast_clean_groupnorm(comfy.ops.manual_cast):
 
 
 # adapted from comfy/sample.py
-def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False, match_shape=False):
+def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim1=False, match_shape=False, flux_shape=None):
     mask = mask.clone()
-    mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(shape[-2]*multiplier, shape[-1]*multiplier), mode="bilinear")
+    if flux_shape is not None:
+        multiplier = multiplier * 0.5
+        mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(round(flux_shape[-2]*multiplier), round(flux_shape[-1]*multiplier)), mode="bilinear")
+        mask = rearrange(mask, "b c h w -> b (h w) c")
+    else:
+        mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(round(shape[-2]*multiplier), round(shape[-1]*multiplier)), mode="bilinear")
     if match_dim1:
         if match_shape and len(shape) < 4:
             raise Exception(f"match_dim1 cannot be True if shape is under 4 dims; was {len(shape)}.")
         mask = torch.cat([mask] * shape[1], dim=1)
-    if match_shape and len(shape) == 3:
+    if match_shape and len(shape) == 3 and len(mask.shape) != 3:
         mask = mask.squeeze(1)
     return mask
 
@@ -775,11 +779,14 @@ class AdvancedControlBase:
         return self.weights.get(idx=idx, control=control, key=key)
     
     def get_calc_pow(self, idx: int, control: dict[str, list[Tensor]], key: str) -> int:
-        c_len = len(control[key])-1
-        if key == "output":
-            if "middle" in control:
-                c_len += len(control["middle"])
-        return c_len-idx
+        if key == "middle":
+            return 0
+        else:
+            c_len = len(control[key])
+            real_idx = c_len-idx
+            if key == "input":
+                real_idx = c_len - real_idx + 1
+            return real_idx
 
     def calc_latent_keyframe_mults(self, x: Tensor, batched_number: int) -> Tensor:
         # apply strengths, and get batch indeces to null out
@@ -829,7 +836,7 @@ class AdvancedControlBase:
             final_tensor = final_tensor.unsqueeze(-1)
         return final_tensor
 
-    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int):
+    def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, flux_shape: tuple=None):
         # handle weight's uncond_multiplier, if applicable
         if self.weights.has_uncond_multiplier:
             cond_or_uncond = self.batched_number.cond_or_uncond
@@ -845,10 +852,10 @@ class AdvancedControlBase:
             x[:] = x[:] * self.calc_latent_keyframe_mults(x=x, batched_number=batched_number)
         # apply masks, resizing mask to required dims
         if self.mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.mask_cond_hint, x.shape, match_shape=True)
+            masks = prepare_mask_batch(self.mask_cond_hint, x.shape, match_shape=True, flux_shape=flux_shape)
             x[:] = x[:] * masks
         if self.tk_mask_cond_hint is not None:
-            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape, match_shape=True)
+            masks = prepare_mask_batch(self.tk_mask_cond_hint, x.shape, match_shape=True, flux_shape=flux_shape)
             x[:] = x[:] * masks
         # apply timestep keyframe strengths
         if self._current_timestep_keyframe.strength != 1.0:
@@ -871,7 +878,7 @@ class AdvancedControlBase:
                         self.apply_advanced_strengths_and_masks(x, self.batched_number)
                         x *= self.strength * self.calc_weight(i, x, control, key)
 
-                    if x.dtype != output_dtype:
+                    if output_dtype is not None and x.dtype != output_dtype:
                         x = x.to(output_dtype)
 
                 out[key].append(x)
@@ -913,7 +920,7 @@ class AdvancedControlBase:
                 del out_mask
                 # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
                 # resize mask and match batch count
-                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier)
+                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier, match_shape=True)
                 actual_latent_length = x_noisy.shape[0] // batched_number
                 out_mask = extend_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
                 if self.sub_idxs is not None:
