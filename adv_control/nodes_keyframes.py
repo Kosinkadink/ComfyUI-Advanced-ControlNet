@@ -82,7 +82,7 @@ class TimestepKeyframeInterpolationNode:
                 "inherit_missing": ("BOOLEAN", {"default": True},),
                 "mask_optional": ("MASK", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
-                "autosize": ("ACNAUTOSIZE", {"padding": 50}),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
