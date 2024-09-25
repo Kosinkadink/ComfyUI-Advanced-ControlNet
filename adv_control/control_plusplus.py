@@ -276,10 +276,10 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
             self.cond_hint_original = pp_group
         return to_return
 
-    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number):
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number, transformer_options):
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
 
         if self.timestep_range is not None:
             if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:

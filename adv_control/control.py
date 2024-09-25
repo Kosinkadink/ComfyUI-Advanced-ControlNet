@@ -39,14 +39,14 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
             return raw_weights[idx]
         return self.weights.copy_with_new_weights(new_weight_func=cn_weights_func)
 
-    def get_control_advanced(self, x_noisy, t, cond, batched_number):
+    def get_control_advanced(self, x_noisy, t, cond, batched_number, transformer_options):
         # perform special version of get_control that supports sliding context and masks
-        return self.sliding_get_control(x_noisy, t, cond, batched_number)
+        return self.sliding_get_control(x_noisy, t, cond, batched_number, transformer_options)
 
-    def sliding_get_control(self, x_noisy: Tensor, t, cond, batched_number):
+    def sliding_get_control(self, x_noisy: Tensor, t, cond, batched_number, transformer_options):
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
 
         if self.timestep_range is not None:
             if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
@@ -173,7 +173,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
             indeces.reverse()  # need to reverse to match recent ComfyUI changes
         return indeces[idx]
 
-    def get_control_advanced(self, x_noisy, t, cond, batched_number):
+    def get_control_advanced(self, x_noisy, t, cond, batched_number, transformer_options):
         try:
             # if sub indexes present, replace original hint with subsection
             if self.sub_idxs is not None:
@@ -187,7 +187,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
                 self.cond_hint_original = actual_cond_hint_orig[self.sub_idxs]
             # mask hints
             self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
-            return super().get_control(x_noisy, t, cond, batched_number)
+            return super().get_control(x_noisy, t, cond, batched_number, transformer_options)
         finally:
             if self.sub_idxs is not None:
                 # replace original cond hint
@@ -252,10 +252,10 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
         self.cond_hint_original = self.cond_hint_original * 2.0 - 1.0
         return to_return
 
-    def get_control_advanced(self, x_noisy, t, cond, batched_number):
+    def get_control_advanced(self, x_noisy, t, cond, batched_number, transformer_options):
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
 
         if self.timestep_range is not None:
             if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
@@ -324,11 +324,11 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.model_latent_format = None  # latent format for active SD model, NOT controlnet
         self.preprocessed = False
     
-    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options):
         # normal ControlNet stuff
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
 
         if self.timestep_range is not None:
             if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:

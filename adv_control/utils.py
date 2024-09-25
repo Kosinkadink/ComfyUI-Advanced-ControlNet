@@ -9,9 +9,6 @@ import math
 
 import comfy.ops
 import comfy.utils
-import comfy.sample
-import comfy.samplers
-import comfy.model_base
 
 from comfy.controlnet import ControlBase
 from comfy.model_patcher import ModelPatcher
@@ -32,108 +29,6 @@ def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_l
         comfy.utils.load_torch_file = orig_load_torch_file
         return controlnet_data
     return load_torch_file_with_dict
-
-# wrapping len function so that it will save the thing len is trying to get the length of;
-# this will be assumed to be the cond_or_uncond variable;
-# automatically restores len to original function after running
-def wrapper_len_factory(orig_len: Callable) -> Callable:
-    def wrapper_len(*args, **kwargs):
-        cond_or_uncond = args[0]
-        real_length = orig_len(*args, **kwargs)
-        if real_length > 0 and type(cond_or_uncond) == list and isinstance(cond_or_uncond[0], int) and (cond_or_uncond[0] in [0, 1]):
-            try:
-                to_return = IntWithCondOrUncond(real_length)
-                setattr(to_return, "cond_or_uncond", cond_or_uncond)
-                return to_return
-            finally:
-                __builtins__["len"] = orig_len
-        else:
-            return real_length
-    return wrapper_len
-
-# wrapping cond_cat function so that it will wrap around len function to get cond_or_uncond variable value
-# from comfy.samplers.calc_conds_batch
-def wrapper_cond_cat_factory(orig_cond_cat: Callable):
-    def wrapper_cond_cat(*args, **kwargs):
-        __builtins__["len"] = wrapper_len_factory(__builtins__["len"])
-        return orig_cond_cat(*args, **kwargs)
-    return wrapper_cond_cat
-orig_cond_cat = comfy.samplers.cond_cat
-comfy.samplers.cond_cat = wrapper_cond_cat_factory(orig_cond_cat)
-
-
-# wrapping apply_model so that len function will be cleaned up fairly soon after being injected
-def apply_model_uncond_cleanup_factory(orig_apply_model, orig_len):
-    def apply_model_uncond_cleanup_wrapper(self, *args, **kwargs):
-        __builtins__["len"] = orig_len
-        return orig_apply_model(self, *args, **kwargs)
-    return apply_model_uncond_cleanup_wrapper
-global_orig_len = __builtins__["len"]
-orig_apply_model = comfy.model_base.BaseModel.apply_model
-comfy.model_base.BaseModel.apply_model = apply_model_uncond_cleanup_factory(orig_apply_model, global_orig_len)
-
-
-def uncond_multiplier_check_cn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
-    def contains_uncond_multiplier(control: Union[ControlBase, 'AdvancedControlBase']):
-        if control is None:
-            return False
-        if not isinstance(control, AdvancedControlBase):
-            return contains_uncond_multiplier(control.previous_controlnet)
-        # check if weights_override has an uncond_multiplier
-        if control.weights_override is not None and control.weights_override.has_uncond_multiplier:
-            return True
-        # check if any timestep_keyframes have an uncond_multiplier on their weights
-        if control.timestep_keyframes is not None:
-            for tk in control.timestep_keyframes.keyframes:
-                if tk.has_control_weights() and tk.control_weights.has_uncond_multiplier:
-                    return True
-        return contains_uncond_multiplier(control.previous_controlnet)
-
-    # check if positive or negative conds contain Adv. Cns that use multiply_negative on weights
-    def uncond_multiplier_check_cn_sample(model: ModelPatcher, *args, **kwargs):
-        positive = args[-3]
-        negative = args[-2]
-        has_uncond_multiplier = False
-        if positive is not None:
-            for cond in positive:
-                if "control" in cond[1]:
-                    has_uncond_multiplier = contains_uncond_multiplier(cond[1]["control"])
-                    if has_uncond_multiplier:
-                        break
-        if negative is not None and not has_uncond_multiplier:
-            for cond in negative:
-                if "control" in cond[1]:
-                    has_uncond_multiplier = contains_uncond_multiplier(cond[1]["control"])
-                    if has_uncond_multiplier:
-                        break
-        try:
-            # if uncond_multiplier found, continue to use wrapped version of function
-            if has_uncond_multiplier:
-                return orig_comfy_sample(model, *args, **kwargs)
-            # otherwise, use original version of function to prevent even the smallest of slowdowns (0.XX%)
-            try:
-                wrapped_cond_cat = comfy.samplers.cond_cat
-                comfy.samplers.cond_cat = orig_cond_cat
-                return orig_comfy_sample(model, *args, **kwargs)
-            finally:
-                comfy.samplers.cond_cat = wrapped_cond_cat
-        finally:
-            # make sure len function is unwrapped by the time sampling is done, just in case
-            __builtins__["len"] = global_orig_len
-    return uncond_multiplier_check_cn_sample
-# inject sample functions
-comfy.sample.sample = uncond_multiplier_check_cn_sample_factory(comfy.sample.sample)
-comfy.sample.sample_custom = uncond_multiplier_check_cn_sample_factory(comfy.sample.sample_custom, is_custom=True)
-
-
-class IntWithCondOrUncond(int):
-    def __new__(cls, *args, **kwargs):
-        return super(IntWithCondOrUncond, cls).__new__(cls, *args, **kwargs)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-        self.cond_or_uncond = None
-
 
 
 def get_properly_arranged_t2i_weights(initial_weights: list[float]):
@@ -579,8 +474,9 @@ class AdvancedControlBase:
         # timesteps
         self.t: float = None
         self.prev_t: float = None
-        self.batched_number: Union[int, IntWithCondOrUncond] = None
+        self.batched_number: int = None
         self.batch_size: int = 0
+        self.cond_or_uncond: list[int] = None
         # weights + override
         self.weights: ControlWeights = None
         self.weights_default: ControlWeights = weights_default
@@ -750,24 +646,25 @@ class AdvancedControlBase:
                 return False
         return True
 
-    def get_control_inject(self, x_noisy, t, cond, batched_number):
+    def get_control_inject(self, x_noisy, t, cond, batched_number, transformer_options: dict):
         self.batched_number = batched_number
         self.batch_size = len(t)
+        self.cond_or_uncond = transformer_options.get("cond_or_uncond", None)
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
         if self.strength == 0.0 or self._current_timestep_keyframe.strength == 0.0:
             return self.default_control_actions(x_noisy, t, cond, batched_number)
         # otherwise, perform normal function
-        return self.get_control_advanced(x_noisy, t, cond, batched_number)
+        return self.get_control_advanced(x_noisy, t, cond, batched_number, transformer_options)
 
-    def get_control_advanced(self, x_noisy, t, cond, batched_number):
-        return self.default_control_actions(x_noisy, t, cond, batched_number)
+    def get_control_advanced(self, x_noisy, t, cond, batched_number, transformer_options):
+        return self.default_control_actions(x_noisy, t, cond, batched_number, transformer_options)
 
-    def default_control_actions(self, x_noisy, t, cond, batched_number):
+    def default_control_actions(self, x_noisy, t, cond, batched_number, transformer_options):
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
         return control_prev
 
     def calc_weight(self, idx: int, x: Tensor, control: dict[str, list[Tensor]], key: str) -> Union[float, Tensor]:
@@ -839,9 +736,8 @@ class AdvancedControlBase:
     def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, flux_shape: tuple=None):
         # handle weight's uncond_multiplier, if applicable
         if self.weights.has_uncond_multiplier:
-            cond_or_uncond = self.batched_number.cond_or_uncond
             actual_length = x.size(0) // batched_number
-            for idx, cond_type in enumerate(cond_or_uncond):
+            for idx, cond_type in enumerate(self.cond_or_uncond):
                 # if uncond, set to weight's uncond_multiplier
                 if cond_type == 1:
                     x[actual_length*idx:actual_length*(idx+1)] *= self.weights.uncond_multiplier

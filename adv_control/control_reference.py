@@ -239,11 +239,11 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
                 ropts.attn_style_fidelity = ropts.original_attn_style_fidelity
                 ropts.adain_style_fidelity = ropts.original_adain_style_fidelity
 
-    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options):
         # normal ControlNet stuff
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
 
         if self.timestep_range is not None:
             if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
