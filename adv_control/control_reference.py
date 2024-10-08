@@ -452,7 +452,10 @@ class BankStylesBasicTransformerBlock:
                 per_i[i].append(bank)
         real_banks = []
         for bank in per_i:
-            combined = torch.cat(bank, dim=0)
+            if len(bank) == 1:
+                combined = bank[0]
+            else:
+                combined = torch.cat(bank, dim=0)
             real_banks.append(combined)
         return real_banks
 
@@ -917,7 +920,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             value_attn1 = n
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
-        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(uuids, ignore_contextref_read)) > 0:
+        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_cn_idxs(uuids, ignore_contextref_read)) > 0:
             bank_styles = self.injection_holder.bank_styles
             style_fidelity = bank_styles.get_avg_style_fidelity(uuids, ignore_contextref_read)
             real_bank = bank_styles.get_bank(uuids, ignore_contextref_read, cdevice=n.device).copy()
@@ -954,7 +957,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n = self.attn1.to_out(n)
     else:
         # Reference CN READ - no attn1_replace_patch
-        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(uuids, ignore_contextref_read)) > 0:
+        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_cn_idxs(uuids, ignore_contextref_read)) > 0:
             if context_attn1 is None:
                 context_attn1 = n
             bank_styles = self.injection_holder.bank_styles
