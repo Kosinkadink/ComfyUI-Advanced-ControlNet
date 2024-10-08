@@ -1,5 +1,6 @@
 from typing import Callable, Union
 
+from uuid import UUID
 import math
 import torch
 from torch import Tensor
@@ -306,7 +307,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         return self
 
 
-def handle_context_ref_setup(contextref_obj, transformer_options: dict, positive, negative):
+def handle_context_ref_setup(contextref_obj, transformer_options: dict, conds: list[dict]):
     transformer_options[CONTEXTREF_MACHINE_STATE] = MachineState.OFF
     # verify version is compatible
     if contextref_obj.version > HIGHEST_VERSION_SUPPORT:
@@ -327,7 +328,7 @@ def handle_context_ref_setup(contextref_obj, transformer_options: dict, positive
     context_ref_list = [cref]
     transformer_options[CONTEXTREF_CONTROL_LIST_ALL] = context_ref_list
     transformer_options[CONTEXTREF_OPTIONS_CLASS] = ReferenceOptions
-    _add_context_ref_to_conds([positive, negative], cref)
+    _add_context_ref_to_conds(conds, cref)
     return context_ref_list
 
 
@@ -421,46 +422,81 @@ class BankStylesBasicTransformerBlock:
         self.style_cfgs = []
         self.cn_idx: list[int] = []
         # contextref - list of lists as each cond/uncond stored separately
-        self.c_bank: list[list] = []
-        self.c_style_cfgs: list[list] = []
-        self.c_cn_idx: list[list[int]] = []
+        self.c_bank: dict[UUID, list[Tensor]] = {}
+        self.c_style_cfgs: dict[UUID, list[float]] = {}
+        self.c_cn_idx: dict[UUID, list[int]] = {}
 
-    def get_bank(self, cref_idx, ignore_contextref, cdevice=None):
-        if ignore_contextref or cref_idx >= len(self.c_bank):
+        # self.c_bank: list[list] = []
+        # self.c_style_cfgs: list[list] = []
+        # self.c_cn_idx: list[list[int]] = []
+
+    def set_c_bank_for_uuids(self, x: Tensor, uuids: list[UUID]):
+        per_uuid = len(x) // len(uuids)
+        for uuid, i in zip(uuids, list(range(0, len(x), per_uuid))):
+            self.c_bank.setdefault(uuid, []).append(x[i:i+per_uuid])
+
+    def set_c_style_cfgs_for_uuids(self, style_cfg: float, uuids: list[UUID]):
+        for uuid in uuids:
+            self.c_style_cfgs.setdefault(uuid, []).append(style_cfg)
+    
+    def set_c_cn_idx_for_uuids(self, cn_idx: int, uuids: list[UUID]):
+        for uuid in uuids:
+            self.c_cn_idx.setdefault(uuid, []).append(cn_idx)
+
+    def _get_c_bank_for_uuids(self, uuids: list[UUID]):
+        banks = []
+        for uuid in uuids:
+            per_i: list[list[Tensor]] = []
+            for i, bank in enumerate(self.c_bank[uuid]):
+                if i >= len(per_i):
+                    per_i.append([])
+                per_i[i].append(bank)
+            banks.append(per_i)
+        real_banks = []
+        for bank in real_banks:
+            real_banks.append(torch.cat(bank, dim=0))
+        return real_banks
+
+    def get_bank(self, uuids: list[UUID], ignore_contextref, cdevice=None):
+        if ignore_contextref:
             return self.bank
-        real_c_bank_list = self.c_bank[cref_idx]
+        real_c_bank_list = self._get_c_bank_for_uuids(uuids)
         if cdevice != None:
             real_c_bank_list = real_c_bank_list.copy()
             for i in range(len(real_c_bank_list)):
                 real_c_bank_list[i] = real_c_bank_list[i].to(cdevice)
         return self.bank + real_c_bank_list
 
-    def get_avg_style_fidelity(self, cref_idx, ignore_contextref):
-        if ignore_contextref or cref_idx >= len(self.c_style_cfgs):
+    def _get_c_style_cfgs_for_uuids(self, uuids: list[UUID]):
+        # c_style_cfgs will be the same for all uuids
+        return self.c_style_cfgs.values()[0]
+
+    def get_avg_style_fidelity(self, uuids: list[UUID], ignore_contextref):
+        if ignore_contextref:
             return sum(self.style_cfgs) / float(len(self.style_cfgs))
-        combined = self.style_cfgs + self.c_style_cfgs[cref_idx]
+        combined = self.style_cfgs + self._get_c_style_cfgs_for_uuids(uuids)
         return sum(combined) / float(len(combined))
     
-    def get_cn_idxs(self, cref_idx, ignore_contxtref):
-        if ignore_contxtref or cref_idx >= len(self.c_cn_idx):
+    def _get_c_cn_idxs_for_uuids(self, uuids: list[UUID]):
+        # c_cn_idxs will be the same for all uids
+        return self.c_cn_idx.values()[0]
+
+    def get_cn_idxs(self, uuids: list[UUID], ignore_contxtref):
+        if ignore_contxtref:
             return self.cn_idx
-        return self.cn_idx + self.c_cn_idx[cref_idx]
-
-    def init_cref_for_idx(self, cref_idx: int):
-        # makes sure cref lists can accommodate cref_idx 
-        if cref_idx < 0:
-            return
-        while cref_idx >= len(self.c_bank):
-            self.c_bank.append([])
-            self.c_style_cfgs.append([])
-            self.c_cn_idx.append([])
-
-    def clear_cref_for_idx(self, cref_idx: int):
-        if cref_idx < 0 or cref_idx >= len(self.c_bank):
-            return
-        self.c_bank[cref_idx] = []
-        self.c_style_cfgs[cref_idx] = []
-        self.c_cn_idx[cref_idx] = []
+        return self.cn_idx + self._get_c_cn_idxs_for_uuids(uuids)
+    
+    def init_cref_for_uuids(self, uuids: list[UUID]):
+        for uuid in uuids:
+            self.c_bank.setdefault(uuid, [])
+            self.c_style_cfgs.setdefault(uuid, [])
+            self.c_cn_idx.setdefault(uuid, [])
+    
+    def clear_cref_for_uuids(self, uuids: list[UUID]):
+        for uuid in uuids:
+            self.c_bank[uuid] = []
+            self.c_style_cfgs[uuid] = []
+            self.c_cn_idx[uuid] = []
 
     def clean_ref(self):
         del self.bank
@@ -474,9 +510,9 @@ class BankStylesBasicTransformerBlock:
         del self.c_bank
         del self.c_style_cfgs
         del self.c_cn_idx
-        self.c_bank = []
-        self.c_style_cfgs = []
-        self.c_cn_idx = []
+        self.c_bank = {}
+        self.c_style_cfgs = {}
+        self.c_cn_idx = {}
 
     def clean_all(self):
         self.clean_ref()
@@ -828,12 +864,15 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
 
     # Reference CN stuff
     uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
+    uuids = transformer_options["uuids"]
+    cref_mode = transformer_options.get(CONTEXTREF_MACHINE_STATE, MachineState.OFF)
     #c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
     # WRITE mode may have only 1 ReferenceAdvanced for RefCN at a time, other modes will have all ReferenceAdvanced
     ref_write_cns: list[ReferenceAdvanced] = transformer_options.get(REF_WRITE_ATTN_CONTROL_LIST, [])
     ref_read_cns: list[ReferenceAdvanced] = transformer_options.get(REF_READ_ATTN_CONTROL_LIST, [])
-    cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
-    ignore_contextref_read = cref_cond_idx < 0 # if writing to bank, should NOT be read in the same execution
+    #cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
+    ignore_contextref_read = cref_mode in [MachineState.OFF, MachineState.WRITE]
+    #ignore_contextref_read = cref_cond_idx < 0 # if just writing to bank, should NOT be read in the same execution
 
     cached_n = None
     cref_write_cns: list[ReferenceAdvanced] = []
@@ -847,7 +886,7 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             # store RefCN and ContextRef stuff separately
             if refcn.is_context_ref:
                 cref_write_cns.append(refcn)
-                self.injection_holder.bank_styles.init_cref_for_idx(cref_cond_idx)
+                self.injection_holder.bank_styles.init_cref_for_uuids(uuids)
             else: # Reference CN WRITE
                 self.injection_holder.bank_styles.bank.append(cached_n)
                 self.injection_holder.bank_styles.style_cfgs.append(refcn.ref_opts.attn_style_fidelity)
@@ -878,11 +917,11 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             value_attn1 = n
         n = self.attn1.to_q(n)
         # Reference CN READ - use attn1_replace_patch appropriately
-        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(cref_cond_idx, ignore_contextref_read)) > 0:
+        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(uuids, ignore_contextref_read)) > 0:
             bank_styles = self.injection_holder.bank_styles
-            style_fidelity = bank_styles.get_avg_style_fidelity(cref_cond_idx, ignore_contextref_read)
-            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read, cdevice=n.device).copy()
-            real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
+            style_fidelity = bank_styles.get_avg_style_fidelity(uuids, ignore_contextref_read)
+            real_bank = bank_styles.get_bank(uuids, ignore_contextref_read, cdevice=n.device).copy()
+            real_cn_idxs = bank_styles.get_cn_idxs(uuids, ignore_contextref_read)
             cn_idx = 0
             for idx, order in enumerate(real_cn_idxs):
                 # make sure matching ref cn is selected
@@ -915,13 +954,13 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
             n = self.attn1.to_out(n)
     else:
         # Reference CN READ - no attn1_replace_patch
-        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(cref_cond_idx, ignore_contextref_read)) > 0:
+        if len(ref_read_cns) > 0 and len(self.injection_holder.bank_styles.get_bank(uuids, ignore_contextref_read)) > 0:
             if context_attn1 is None:
                 context_attn1 = n
             bank_styles = self.injection_holder.bank_styles
-            style_fidelity = bank_styles.get_avg_style_fidelity(cref_cond_idx, ignore_contextref_read)
-            real_bank = bank_styles.get_bank(cref_cond_idx, ignore_contextref_read, cdevice=n.device).copy()
-            real_cn_idxs = bank_styles.get_cn_idxs(cref_cond_idx, ignore_contextref_read)
+            style_fidelity = bank_styles.get_avg_style_fidelity(uuids, ignore_contextref_read)
+            real_bank = bank_styles.get_bank(uuids, ignore_contextref_read, cdevice=n.device).copy()
+            real_cn_idxs = bank_styles.get_cn_idxs(uuids, ignore_contextref_read)
             cn_idx = 0
             for idx, order in enumerate(real_cn_idxs):
                 # make sure matching ref cn is selected
@@ -950,13 +989,13 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
 
     # ContextRef CN WRITE
     if len(cref_write_cns) > 0:
-        # clear so that ContextRef CNs can properly 'replace' previous value at cond_idx
-        self.injection_holder.bank_styles.clear_cref_for_idx(cref_cond_idx)
+        # clear so that ContextRef CNs can properly 'replace' previous value at relevant uuids
+        self.injection_holder.bank_styles.clear_cref_for_uuids(uuids)
         for refcn in cref_write_cns:
             # add a whole list to match expected type when combining
-            self.injection_holder.bank_styles.c_bank[cref_cond_idx].append(cached_n.to(comfy.model_management.unet_offload_device()))
-            self.injection_holder.bank_styles.c_style_cfgs[cref_cond_idx].append(refcn.ref_opts.attn_style_fidelity)
-            self.injection_holder.bank_styles.c_cn_idx[cref_cond_idx].append(refcn.order)
+            self.injection_holder.bank_styles.set_c_bank_for_uuids(cached_n.to(comfy.model_management.unet_offload_device()), uuids)
+            self.injection_holder.bank_styles.set_c_style_cfgs_for_uuids(refcn.ref_opts.attn_style_fidelity, uuids)
+            self.injection_holder.bank_styles.set_c_cn_idx_for_uuids(refcn.order, uuids)
         del cached_n
 
     if "attn1_output_patch" in transformer_patches:
@@ -1028,6 +1067,7 @@ def forward_timestep_embed_ref_inject_factory(orig_timestep_embed_inject_factory
         transformer_options: dict[str] = args[4]
         # Reference CN stuff
         uc_idx_mask = transformer_options.get(REF_UNCOND_IDXS, [])
+        uuids = transformer_options["uuids"]
         #c_idx_mask = transformer_options.get(REF_COND_IDXS, [])
         # WRITE mode will only have one ReferenceAdvanced, other modes will have all ReferenceAdvanced
         ref_write_cns: list[ReferenceAdvanced] = transformer_options.get(REF_WRITE_ADAIN_CONTROL_LIST, [])

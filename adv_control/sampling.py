@@ -1,5 +1,6 @@
 from typing import Callable, Union
 
+import comfy.model_patcher
 import comfy.sample
 import comfy.samplers
 from comfy.model_patcher import ModelPatcher
@@ -18,11 +19,10 @@ from .control_lllite import (ControlLLLiteAdvanced)
 from .utils import torch_dfs
 
 
-def support_sliding_context_windows(model, positive, negative) -> tuple[bool, dict, dict]:
+def support_sliding_context_windows(conds) -> tuple[bool, list[dict]]:
     # convert to advanced, with report if anything was actually modified
-    modified, new_conds = convert_all_to_advanced([positive, negative])
-    positive, negative = new_conds
-    return modified, positive, negative
+    modified, new_conds = convert_all_to_advanced(conds)
+    return modified, new_conds
 
 
 def has_sliding_context_windows(model: ModelPatcher):
@@ -70,32 +70,25 @@ def get_lllitecn(control: ControlBase):
     cn_dict.update(get_lllitecn(control.previous_controlnet))
     return cn_dict
 
-def acn_sample_wrapper(executor, guider: comfy.samplers.CFGGuider, *args, **kwargs):
+def acn_sampler_sample_wrapper(executor, *args, **kwargs):
     controlnets_modified = False
+    guider: comfy.samplers.CFGGuider = args[0]
+    extra_args: dict = args[2]
     orig_conds = guider.conds
-    orig_positive = args[-3]
-    orig_negative = args[-2]
+    orig_model_options = extra_args["model_options"]
     try:
-        orig_model_options = model.model_options
-        # check if positive or negative conds contain ref cn
-        positive = args[-3]
-        negative = args[-2]
         # if context options present, perform some special actions that may be required
         context_refs = []
-        if has_sliding_context_windows(model):
-            model.model_options = model.model_options.copy()
-            model.model_options["transformer_options"] = model.model_options["transformer_options"].copy()
+        if has_sliding_context_windows(guider.model_patcher):
+            extra_args["model_options"] = comfy.model_patcher.create_model_options_clone(orig_model_options)
             # convert all CNs to Advanced if needed
-            controlnets_modified, positive, negative = support_sliding_context_windows(model, positive, negative)
+            controlnets_modified, conds = support_sliding_context_windows(orig_conds.values())
             if controlnets_modified:
-                args = list(args)
-                args[-3] = positive
-                args[-2] = negative
-                args = tuple(args)
+                guider.conds = conds
             # enable ContextRef, if requested
-            existing_contextref_obj = get_contextref_obj(model)
+            existing_contextref_obj = get_contextref_obj(guider.model_patcher)
             if existing_contextref_obj is not None:
-                context_refs = handle_context_ref_setup(existing_contextref_obj, model.model_options["transformer_options"], positive, negative)
+                context_refs = handle_context_ref_setup(existing_contextref_obj, extra_args["model_options"]["transformer_options"], guider.conds.values())
                 controlnets_modified = True
         # look for Advanced ControlNets that will require intervention to work
         ref_set = set()
@@ -215,10 +208,12 @@ def acn_sample_wrapper(executor, guider: comfy.samplers.CFGGuider, *args, **kwar
             reference_injections.cleanup()
     finally:
         # restore model_options
-        model.model_options = orig_model_options
+        extra_args["model_options"] = orig_model_options
+        # restore guider.conds
+        guider.conds = orig_conds
         # restore controlnets in conds, if needed
         if controlnets_modified:
-            restore_all_controlnet_conns([orig_positive, orig_negative])
+            restore_all_controlnet_conns(orig_conds)
 
 
 
@@ -240,7 +235,8 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                 model.model_options = model.model_options.copy()
                 model.model_options["transformer_options"] = model.model_options["transformer_options"].copy()
                 # convert all CNs to Advanced if needed
-                controlnets_modified, positive, negative = support_sliding_context_windows(model, positive, negative)
+                controlnets_modified, conds = support_sliding_context_windows([positive, negative])
+                positive, negative = conds
                 if controlnets_modified:
                     args = list(args)
                     args[-3] = positive
@@ -249,7 +245,7 @@ def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable
                 # enable ContextRef, if requested
                 existing_contextref_obj = get_contextref_obj(model)
                 if existing_contextref_obj is not None:
-                    context_refs = handle_context_ref_setup(existing_contextref_obj, model.model_options["transformer_options"], positive, negative)
+                    context_refs = handle_context_ref_setup(existing_contextref_obj, model.model_options["transformer_options"], [positive, negative])
                     controlnets_modified = True
             # look for Advanced ControlNets that will require intervention to work
             ref_set = set()
