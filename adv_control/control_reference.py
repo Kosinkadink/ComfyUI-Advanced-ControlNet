@@ -444,17 +444,16 @@ class BankStylesBasicTransformerBlock:
             self.c_cn_idx.setdefault(uuid, []).append(cn_idx)
 
     def _get_c_bank_for_uuids(self, uuids: list[UUID]):
-        banks = []
+        per_i: list[list[Tensor]] = []
         for uuid in uuids:
-            per_i: list[list[Tensor]] = []
             for i, bank in enumerate(self.c_bank[uuid]):
                 if i >= len(per_i):
                     per_i.append([])
                 per_i[i].append(bank)
-            banks.append(per_i)
         real_banks = []
-        for bank in real_banks:
-            real_banks.append(torch.cat(bank, dim=0))
+        for bank in per_i:
+            combined = torch.cat(bank, dim=0)
+            real_banks.append(combined)
         return real_banks
 
     def get_bank(self, uuids: list[UUID], ignore_contextref, cdevice=None):
@@ -469,7 +468,7 @@ class BankStylesBasicTransformerBlock:
 
     def _get_c_style_cfgs_for_uuids(self, uuids: list[UUID]):
         # c_style_cfgs will be the same for all uuids
-        return self.c_style_cfgs.values()[0]
+        return list(self.c_style_cfgs.values())[0]
 
     def get_avg_style_fidelity(self, uuids: list[UUID], ignore_contextref):
         if ignore_contextref:
@@ -479,7 +478,7 @@ class BankStylesBasicTransformerBlock:
     
     def _get_c_cn_idxs_for_uuids(self, uuids: list[UUID]):
         # c_cn_idxs will be the same for all uids
-        return self.c_cn_idx.values()[0]
+        return list(self.c_cn_idx.values())[0]
 
     def get_cn_idxs(self, uuids: list[UUID], ignore_contxtref):
         if ignore_contxtref:
@@ -870,9 +869,10 @@ def _forward_inject_BasicTransformerBlock(self: RefBasicTransformerBlock, x: Ten
     # WRITE mode may have only 1 ReferenceAdvanced for RefCN at a time, other modes will have all ReferenceAdvanced
     ref_write_cns: list[ReferenceAdvanced] = transformer_options.get(REF_WRITE_ATTN_CONTROL_LIST, [])
     ref_read_cns: list[ReferenceAdvanced] = transformer_options.get(REF_READ_ATTN_CONTROL_LIST, [])
-    #cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
+    cref_cond_idx: int = transformer_options.get(CONTEXTREF_TEMP_COND_IDX, -1)
     ignore_contextref_read = cref_mode in [MachineState.OFF, MachineState.WRITE]
     #ignore_contextref_read = cref_cond_idx < 0 # if just writing to bank, should NOT be read in the same execution
+    #logger.info(f"cref: {cref_cond_idx}, cmode: {cref_mode}, ignored: {ignore_contextref_read}")
 
     cached_n = None
     cref_write_cns: list[ReferenceAdvanced] = []
