@@ -931,7 +931,7 @@ class AdvancedControlBase:
             # default dtype to be same as x_noisy
             if dtype is None:
                 dtype = x_noisy.dtype
-            setattr(self, attr_name, out_mask.to(dtype=dtype).to(self.device))
+            setattr(self, attr_name, out_mask.to(dtype=dtype).to(x_noisy.device))
             del out_mask
 
     def _reset_attr(self, attr_name, new_value=None):
