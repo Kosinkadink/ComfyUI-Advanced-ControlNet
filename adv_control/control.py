@@ -21,8 +21,8 @@ from .logger import logger
 
 
 class ControlNetAdvanced(ControlNet, AdvancedControlBase):
-    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, device=None, load_device=None, manual_cast_dtype=None, extra_conds=["y"], strength_type=StrengthType.CONSTANT):
-        super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, compression_ratio=compression_ratio, latent_format=latent_format, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, load_device=None, manual_cast_dtype=None, extra_conds=["y"], strength_type=StrengthType.CONSTANT):
+        super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, compression_ratio=compression_ratio, latent_format=latent_format, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
         self.is_flux = False
         self.x_noisy_shape = None
@@ -82,7 +82,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 comfy.model_management.load_models_gpu(loaded_models)
             if self.latent_format is not None:
                 self.cond_hint = self.latent_format.process_in(self.cond_hint)
-            self.cond_hint = self.cond_hint.to(device=self.device, dtype=dtype)
+            self.cond_hint = self.cond_hint.to(device=x_noisy.device, dtype=dtype)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
@@ -126,7 +126,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
     @staticmethod
     def from_vanilla(v: ControlNet, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlNetAdvanced':
         to_return = ControlNetAdvanced(control_model=v.control_model, timestep_keyframes=timestep_keyframe,
-                                  global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, device=v.device, load_device=v.load_device,
+                                  global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, load_device=v.load_device,
                                   manual_cast_dtype=v.manual_cast_dtype)
         v.copy_to(to_return)
         return to_return
@@ -213,8 +213,8 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
 
 
 class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
-    def __init__(self, control_weights, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None):
-        super().__init__(control_weights=control_weights, global_average_pooling=global_average_pooling, device=device)
+    def __init__(self, control_weights, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False):
+        super().__init__(control_weights=control_weights, global_average_pooling=global_average_pooling)
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllora())
         # use some functions from ControlNetAdvanced
         self.get_control_advanced = ControlNetAdvanced.get_control_advanced.__get__(self, type(self))
@@ -237,14 +237,14 @@ class ControlLoraAdvanced(ControlLora, AdvancedControlBase):
     @staticmethod
     def from_vanilla(v: ControlLora, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlLoraAdvanced':
         to_return = ControlLoraAdvanced(control_weights=v.control_weights, timestep_keyframes=timestep_keyframe,
-                                   global_average_pooling=v.global_average_pooling, device=v.device)
+                                   global_average_pooling=v.global_average_pooling)
         v.copy_to(to_return)
         return to_return
 
 
 class SVDControlNetAdvanced(ControlNetAdvanced):
-    def __init__(self, control_model: SVDControlNet, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
-        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    def __init__(self, control_model: SVDControlNet, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
 
     def set_cond_hint_inject(self, *args, **kwargs):
         to_return = super().set_cond_hint_inject(*args, **kwargs)
@@ -280,9 +280,9 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
                 actual_cond_hint_orig = self.cond_hint_original
                 if self.cond_hint_original.size(0) < self.full_latent_length:
                     actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
-                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(x_noisy.device)
             else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(x_noisy.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
@@ -311,8 +311,8 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
 
 
 class SparseCtrlAdvanced(ControlNetAdvanced):
-    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
-        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, device=device, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
         self.control_model_wrapped = SparseModelPatcher(self.control_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
@@ -377,25 +377,25 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                         self.local_sparse_idxs_inverse.remove(actual_i)
             # sub_cond_hint now contains the hints relevant to current x_noisy
             if hint_order is None:
-                sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(self.device)
+                sub_cond_hint = self.cond_hint_original[hint_idxs].to(dtype).to(x_noisy.device)
             else:
-                sub_cond_hint = self.cond_hint_original[hint_order][hint_idxs].to(dtype).to(self.device)
+                sub_cond_hint = self.cond_hint_original[hint_order][hint_idxs].to(dtype).to(x_noisy.device)
             # scale cond_hints to match noisy input
             if self.control_model.use_simplified_conditioning_embedding:
                 # RGB SparseCtrl; the inputs are latents - use bilinear to avoid blocky artifacts
                 sub_cond_hint = self.model_latent_format.process_in(sub_cond_hint)  # multiplies by model scale factor
-                sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3], x_noisy.shape[2], "nearest-exact", "center").to(dtype).to(self.device)
+                sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3], x_noisy.shape[2], "nearest-exact", "center").to(dtype).to(x_noisy.device)
             else:
                 # other SparseCtrl; inputs are typical images
-                sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+                sub_cond_hint = comfy.utils.common_upscale(sub_cond_hint, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(x_noisy.device)
             # prepare cond_hint (b, c, h ,w)
             cond_shape = list(sub_cond_hint.shape)
             cond_shape[0] = len(range_idxs)
-            self.cond_hint = torch.zeros(cond_shape).to(dtype).to(self.device)
+            self.cond_hint = torch.zeros(cond_shape).to(dtype).to(x_noisy.device)
             self.cond_hint[local_idxs] = sub_cond_hint[:]
             # prepare cond_mask (b, 1, h, w)
             cond_shape[1] = 1
-            cond_mask = torch.zeros(cond_shape).to(dtype).to(self.device)
+            cond_mask = torch.zeros(cond_shape).to(dtype).to(x_noisy.device)
             cond_mask[local_idxs] = self.sparse_settings.sparse_mask_mult * self.weights.extras.get(SparseConst.MASK_MULT, 1.0)
             # combine cond_hint and cond_mask into (b, c+1, h, w)
             if not self.sparse_settings.merged:
@@ -446,7 +446,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.local_sparse_idxs_inverse = None
 
     def copy(self):
-        c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.device, self.load_device, self.manual_cast_dtype)
+        c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.load_device, self.manual_cast_dtype)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
