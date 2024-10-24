@@ -141,8 +141,8 @@ class ReferencePreprocWrapper(AbstractPreprocWrapper):
 class ReferenceAdvanced(ControlBase, AdvancedControlBase):
     CHANNEL_TO_MULT = {320: 1, 640: 2, 1280: 4}
 
-    def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, device=None):
-        super().__init__(device)
+    def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup):
+        super().__init__()
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), allow_condhint_latents=True)
         # TODO: allow vae_optional to be used instead of preprocessor
         #require_vae=True
@@ -261,11 +261,11 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
             if self.sub_idxs is not None and self.cond_hint_original.size(0) >= self.full_latent_length:
                 self.cond_hint = comfy.utils.common_upscale(
                     self.cond_hint_original[self.sub_idxs],
-                    x_noisy.shape[3], x_noisy.shape[2], 'nearest-exact', "center").to(dtype).to(self.device)
+                    x_noisy.shape[3], x_noisy.shape[2], 'nearest-exact', "center").to(dtype).to(x_noisy.device)
             else:
                 self.cond_hint = comfy.utils.common_upscale(
                     self.cond_hint_original,
-                    x_noisy.shape[3], x_noisy.shape[2], 'nearest-exact', "center").to(dtype).to(self.device)
+                    x_noisy.shape[3], x_noisy.shape[2], 'nearest-exact', "center").to(dtype).to(x_noisy.device)
             if x_noisy.shape[0] != self.cond_hint.shape[0]:
                 self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number, except_one=False)
             # noise cond_hint based on sigma (current step)
