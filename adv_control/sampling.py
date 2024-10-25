@@ -73,6 +73,7 @@ def get_lllitecn(control: ControlBase):
 def acn_sampler_sample_wrapper(executor, *args, **kwargs):
     controlnets_modified = False
     guider: comfy.samplers.CFGGuider = args[0]
+    model = guider.model_patcher
     extra_args: dict = args[2]
     orig_conds = guider.conds
     orig_model_options = extra_args["model_options"]
@@ -93,13 +94,8 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
         # look for Advanced ControlNets that will require intervention to work
         ref_set = set()
         lllite_dict: dict[ControlLLLiteAdvanced, None] = {} # dicts preserve insertion order since py3.7
-        if positive is not None:
-            for cond in positive:
-                if "control" in cond[1]:
-                    ref_set.update(get_refcn(cond[1]["control"]))
-                    lllite_dict.update(get_lllitecn(cond[1]["control"]))
-        if negative is not None:
-            for cond in negative:
+        for outer_cond in guider.conds.values():
+            for cond in outer_cond:
                 if "control" in cond[1]:
                     ref_set.update(get_refcn(cond[1]["control"]))
                     lllite_dict.update(get_lllitecn(cond[1]["control"]))
@@ -113,7 +109,7 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
                 lll.live_model_patches(model.model_options)
         # if no ref cn found, do original function immediately
         if len(ref_set) == 0 and len(context_refs) == 0:
-            return orig_comfy_sample(model, *args, **kwargs)
+            return executor(*args, **kwargs)
         # otherwise, injection time
         try:
             # inject
@@ -185,7 +181,7 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
             new_model_options["transformer_options"][CONTEXTREF_CLEAN_FUNC] = reference_injections.clean_contextref_module_mem
             model.model_options = new_model_options
             # continue with original function
-            return orig_comfy_sample(model, *args, **kwargs)
+            return executor(*args, **kwargs)
         finally:
             # cleanup injections
             # restore attn modules
@@ -213,10 +209,9 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
         guider.conds = orig_conds
         # restore controlnets in conds, if needed
         if controlnets_modified:
-            restore_all_controlnet_conns(orig_conds)
-
-
-
+            restore_all_controlnet_conns(orig_conds.values())
+        del model
+        del guider
 
 
 def acn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
