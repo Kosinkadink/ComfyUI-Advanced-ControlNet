@@ -287,7 +287,7 @@ class ControlLLLiteModules(torch.nn.Module):
 class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
     # This ControlNet is more of an attention patch than a traditional controlnet
     def __init__(self, patch_attn1: LLLitePatch, patch_attn2: LLLitePatch, timestep_keyframes: TimestepKeyframeGroup, device, ops: comfy.ops.disable_weight_init):
-        super().__init__(device)
+        super().__init__()
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
         self.device = device
         self.ops = ops
