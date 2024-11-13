@@ -25,6 +25,7 @@ from comfy.ldm.modules.attention import attention_basic, attention_pytorch, atte
 from comfy.ldm.modules.attention import FeedForward, SpatialTransformer
 from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential
 from comfy.model_patcher import ModelPatcher
+from comfy.patcher_extension import CallbacksMP
 import comfy.ops
 import comfy.model_management
 import comfy.utils
@@ -110,24 +111,22 @@ class SparseControlNet(ControlNetCLDM):
         return {"middle": out_middle, "output": out_output}
 
 
-class SparseModelPatcher(ModelPatcher):
-    def __init__(self, *args, **kwargs):
-        self.model: SparseControlNet
-        super().__init__(*args, **kwargs)
-    
-    def load(self, device_to=None, lowvram_model_memory=0, *args, **kwargs):
-        to_return = super().load(device_to=device_to, lowvram_model_memory=lowvram_model_memory, *args, **kwargs)
-        if lowvram_model_memory > 0:
-            self._patch_lowvram_extras(device_to=device_to)
-        self._handle_float8_pe_tensors()
-        return to_return
+def create_sparse_modelpatcher(model, load_device, offload_device):
+    patcher = ModelPatcher(model, load_device=load_device, offload_device=offload_device)
+    acn = "ACN"
+    patcher.add_callback_with_key(CallbacksMP.ON_LOAD, acn, _patch_lowvram_extras)
+    patcher.add_callback_with_key(CallbacksMP.ON_LOAD, acn, _handle_float8_pe_tensors)
+    return patcher
 
-    def _patch_lowvram_extras(self, device_to=None):
-        if self.model.motion_wrapper is not None:
+
+def _patch_lowvram_extras(self: ModelPatcher, device_to, lowvram_model_memory, force_patch_weights, full_load, *args, **kwargs):
+    if lowvram_model_memory > 0:
+        motion_wrapper: SparseCtrlMotionWrapper = self.model.motion_wrapper
+        if motion_wrapper is not None:
             # figure out the tensors (likely pe's) that should be cast to device besides just the named_modules
-            remaining_tensors = list(self.model.motion_wrapper.state_dict().keys())
+            remaining_tensors = list(motion_wrapper.state_dict().keys())
             named_modules = []
-            for n, _ in self.model.motion_wrapper.named_modules():
+            for n, _ in motion_wrapper.named_modules():
                 named_modules.append(n)
                 named_modules.append(f"{n}.weight")
                 named_modules.append(f"{n}.bias")
@@ -138,43 +137,21 @@ class SparseModelPatcher(ModelPatcher):
             for key in remaining_tensors:
                 self.patch_weight_to_device(key, device_to)
                 if device_to is not None:
-                    comfy.utils.set_attr(self.model.motion_wrapper, key, comfy.utils.get_attr(self.model.motion_wrapper, key).to(device_to))
+                    comfy.utils.set_attr(motion_wrapper, key, comfy.utils.get_attr(motion_wrapper, key).to(device_to))
 
-    def _handle_float8_pe_tensors(self):
-        if self.model.motion_wrapper is not None:
-            remaining_tensors = list(self.model.motion_wrapper.state_dict().keys())
-            pe_tensors = [x for x in remaining_tensors if '.pe' in x]
-            is_first = True
-            for key in pe_tensors:
-                if is_first:
-                    is_first = False
-                    if comfy.utils.get_attr(self.model.motion_wrapper, key).dtype not in [torch.float8_e5m2, torch.float8_e4m3fn]:
-                        break
-                comfy.utils.set_attr(self.model.motion_wrapper, key, comfy.utils.get_attr(self.model.motion_wrapper, key).half())
 
-    # NOTE: no longer called by ComfyUI, but here for backwards compatibility
-    def patch_model_lowvram(self, device_to=None, *args, **kwargs):
-        patched_model = super().patch_model_lowvram(device_to, *args, **kwargs)
-        self._patch_lowvram_extras(device_to=device_to)
-        return patched_model
-
-    def clone(self):
-        # normal ModelPatcher clone actions
-        n = SparseModelPatcher(self.model, self.load_device, self.offload_device, self.size, weight_inplace_update=self.weight_inplace_update)
-        n.patches = {}
-        for k in self.patches:
-            n.patches[k] = self.patches[k][:]
-        if hasattr(n, "patches_uuid"):
-            self.patches_uuid = n.patches_uuid
-
-        n.object_patches = self.object_patches.copy()
-        n.model_options = copy.deepcopy(self.model_options)
-        if hasattr(n, "model_keys"):
-            n.model_keys = self.model_keys
-        if hasattr(n, "backup"):
-            self.backup = n.backup
-        if hasattr(n, "object_patches_backup"):
-            self.object_patches_backup = n.object_patches_backup
+def _handle_float8_pe_tensors(self: ModelPatcher, *args, **kwargs):
+    motion_wrapper: SparseCtrlMotionWrapper = self.model.motion_wrapper
+    if motion_wrapper is not None:
+        remaining_tensors = list(motion_wrapper.state_dict().keys())
+        pe_tensors = [x for x in remaining_tensors if '.pe' in x]
+        is_first = True
+        for key in pe_tensors:
+            if is_first:
+                is_first = False
+                if comfy.utils.get_attr(motion_wrapper, key).dtype not in [torch.float8_e5m2, torch.float8_e4m3fn]:
+                    break
+            comfy.utils.set_attr(motion_wrapper, key, comfy.utils.get_attr(motion_wrapper, key).half())
 
 
 class PreprocSparseRGBWrapper(AbstractPreprocWrapper):
