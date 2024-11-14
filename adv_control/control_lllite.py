@@ -15,7 +15,7 @@ from comfy.controlnet import ControlBase
 
 from .logger import logger
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, ControlWeights, broadcast_image_to_extend, extend_to_batch_size,
-                    deepcopy_with_sharing, prepare_mask_batch)
+                    prepare_mask_batch)
 
 
 # based on set_model_patch code in comfy/model_patcher.py
@@ -115,26 +115,8 @@ class LLLitePatch:
         return LLLitePatch(self.modules, self.patch_type, control)
 
     def cleanup(self):
-        #total_cleaned = 0
         for module in self.modules.values():
             module.cleanup()
-        #    total_cleaned += 1
-        #logger.info(f"cleaned modules: {total_cleaned}, {id(self)}")
-        #logger.error(f"cleanup LLLitePatch: {id(self)}")
-
-    # make sure deepcopy does not copy control, and deepcopied LLLitePatch should be assigned to control
-    # def __deepcopy__(self, memo):
-    #     self.cleanup()
-    #     to_return: LLLitePatch = deepcopy_with_sharing(self, shared_attribute_names = ['control'], memo=memo)
-    #     #logger.warn(f"patch {id(self)} turned into {id(to_return)}")
-    #     try:
-    #         if self.patch_type == self.ATTN1:
-    #             to_return.control.patch_attn1 = to_return
-    #         elif self.patch_type == self.ATTN2:
-    #             to_return.control.patch_attn2 = to_return
-    #     except Exception:
-    #         pass
-    #     return to_return
 
 
 # TODO: use comfy.ops to support fp8 properly
@@ -387,17 +369,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
-    
-    # deepcopy needs to properly keep track of objects to work between model.clone calls!
-    # def __deepcopy__(self, *args, **kwargs):
-    #     self.cleanup_advanced()
-    #     return self
-
-    # def get_models(self):
-    #     # get_models is called once at the start of every KSampler run - use to reset already_patched status
-    #     out = super().get_models()
-    #     logger.error(f"in get_models! {id(self)}")
-    #     return out
 
 
 def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None):
