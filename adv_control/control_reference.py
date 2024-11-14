@@ -316,7 +316,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         return self
 
 
-def handle_context_ref_setup(contextref_obj, transformer_options: dict, conds: list[dict]):
+def handle_context_ref_setup(contextref_obj, transformer_options: dict, conds: dict[str, list[dict, str]]):
     transformer_options[CONTEXTREF_MACHINE_STATE] = MachineState.OFF
     # verify version is compatible
     if contextref_obj.version > HIGHEST_VERSION_SUPPORT:
@@ -371,7 +371,7 @@ def _create_tks_from_dict_list(dlist: list[dict[str]]) -> TimestepKeyframeGroup:
     return tks
 
 
-def _add_context_ref_to_conds(conds: list[list[dict[str]]], context_ref: ReferenceAdvanced):
+def _add_context_ref_to_conds(conds: dict[list[dict[str]]], context_ref: ReferenceAdvanced):
     def _add_context_ref_to_existing_control(control: ControlBase, context_ref: ReferenceAdvanced):
         curr_cn = control
         while curr_cn is not None:
@@ -395,10 +395,10 @@ def _add_context_ref_to_conds(conds: list[list[dict[str]]], context_ref: Referen
         actual_cond[CONTROL_INIT_BY_ACN] = True
     
     # either add context_ref to end of existing cnet chain, or init 'control' key on actual cond
-    for cond in conds:
+    for cond_type in conds:
+        cond = conds[cond_type]
         if cond is not None:
-            for sub_cond in cond:
-                actual_cond = sub_cond[1]
+            for actual_cond in cond:
                 _add_context_ref(actual_cond, context_ref)
 
 

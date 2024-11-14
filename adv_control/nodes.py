@@ -18,11 +18,6 @@ from .nodes_deprecated import (LoadImagesFromDirectory, ScaledSoftUniversalWeigh
                                ControlNetLoaderAdvancedDEPR, DiffControlNetLoaderAdvancedDEPR)
 from .logger import logger
 
-from .sampling import acn_sample_factory
-# inject sample functions
-#comfy.sample.sample = acn_sample_factory(comfy.sample.sample)
-#comfy.sample.sample_custom = acn_sample_factory(comfy.sample.sample_custom, is_custom=True)
-
 
 # NODE MAPPING
 NODE_CLASS_MAPPINGS = {

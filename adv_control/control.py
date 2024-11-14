@@ -529,17 +529,16 @@ def convert_to_advanced(control, timestep_keyframe: TimestepKeyframeGroup=None):
     return control
 
 
-def convert_all_to_advanced(conds: list[list[dict[str]]]) -> tuple[bool, list]:
+def convert_all_to_advanced(conds: dict[str, list[dict[str]]]) -> tuple[bool, list]:
     cache = {}
     modified = False
-    new_conds = []
-    for cond in conds:
-        converted_cond = None
+    new_conds = {}
+    for cond_type in conds:
+        converted_cond: list[dict[str]] = None
+        cond = conds[cond_type]
         if cond is not None:
-            need_to_convert = False
-            # first, check if there is even a need to convert
-            for sub_cond in cond:
-                actual_cond = sub_cond[1]
+            for actual_cond in cond:
+                need_to_convert = False
                 if "control" in actual_cond:
                     if not are_all_advanced_controlnet(actual_cond["control"]):
                         need_to_convert = True
@@ -548,23 +547,20 @@ def convert_all_to_advanced(conds: list[list[dict[str]]]) -> tuple[bool, list]:
                 converted_cond = cond
             else:
                 converted_cond = []
-                for sub_cond in cond:
-                    new_sub_cond: list = []
-                    for actual_cond in sub_cond:
-                        if not type(actual_cond) == dict:
-                            new_sub_cond.append(actual_cond)
-                            continue
-                        if "control" not in actual_cond:
-                            new_sub_cond.append(actual_cond)
-                        elif are_all_advanced_controlnet(actual_cond["control"]):
-                            new_sub_cond.append(actual_cond)
-                        else:
-                            actual_cond = actual_cond.copy()
-                            actual_cond["control"] = _convert_all_control_to_advanced(actual_cond["control"], cache)
-                            new_sub_cond.append(actual_cond)
-                            modified = True
-                    converted_cond.append(new_sub_cond)
-        new_conds.append(converted_cond)
+                for actual_cond in cond:
+                    if not isinstance(actual_cond, dict):
+                        converted_cond.append(actual_cond)
+                        continue
+                    if "control" not in actual_cond:
+                        converted_cond.append(actual_cond)
+                    elif are_all_advanced_controlnet(actual_cond["control"]):
+                        converted_cond.append(actual_cond)
+                    else:
+                        actual_cond = actual_cond.copy()
+                        actual_cond["control"] = _convert_all_control_to_advanced(actual_cond["control"], cache)
+                        converted_cond.append(actual_cond)
+                        modified = True
+        new_conds[cond_type] = converted_cond
     return modified, new_conds
 
 
@@ -606,19 +602,21 @@ def _convert_all_control_to_advanced(input_object: ControlBase, cache: dict):
     return output_object
 
 
-def restore_all_controlnet_conns(conds: list[list[dict[str]]]):
+def restore_all_controlnet_conns(conds: dict[str, list[dict[str]]]):
     # if a cn has an _orig_previous_controlnet property, restore it and delete
-    for main_cond in conds:
-        if main_cond is not None:
-            for cond in main_cond:
-                if "control" in cond[1]:
+    for cond_type in conds:
+        cond = conds[cond_type]
+        if cond is not None:
+            for actual_cond in cond:
+                if "control" in actual_cond:
                     # if ACN is the one to have initialized it, delete it
                     # TODO: maybe check if someone else did a similar hack, and carefully pluck out our stuff?
-                    if CONTROL_INIT_BY_ACN in cond[1]:
-                        cond[1].pop("control")
-                        cond[1].pop(CONTROL_INIT_BY_ACN)
+                    if CONTROL_INIT_BY_ACN in actual_cond:
+                        actual_cond.pop("control")
+                        actual_cond.pop(CONTROL_INIT_BY_ACN)
                     else:
-                        _restore_all_controlnet_conns(cond[1]["control"])
+                        _restore_all_controlnet_conns(actual_cond["control"])
+
 
 
 def _restore_all_controlnet_conns(input_object: ControlBase):

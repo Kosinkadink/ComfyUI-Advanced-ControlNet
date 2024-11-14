@@ -14,7 +14,7 @@ from __future__ import annotations
 import comfy.hooks
 from comfy.patcher_extension import WrappersMP
 
-from .sampling import acn_sampler_sample_wrapper
+from .sampling import acn_outer_sample_wrapper
 from .utils import WrapperConsts
 
 DINKLINK = "__DINKLINK"
@@ -33,6 +33,6 @@ def prepare_dinklink():
     d = get_dinklink()
     link_acn = d.setdefault(WrapperConsts.ACN, {})
     link_acn[WrapperConsts.VERSION] = 1
-    link_acn[WrapperConsts.CREATE_SAMPLER_SAMPLE_WRAPPER] = (WrappersMP.SAMPLER_SAMPLE,
-                                                             WrapperConsts.ACN_SAMPLER_SAMPLER_WRAPPER_KEY,
-                                                             acn_sampler_sample_wrapper)
+    link_acn[WrapperConsts.ACN_CREATE_SAMPLER_SAMPLE_WRAPPER] = (WrappersMP.OUTER_SAMPLE,
+                                                             WrapperConsts.ACN_OUTER_SAMPLE_WRAPPER_KEY,
+                                                             acn_outer_sample_wrapper)
