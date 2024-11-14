@@ -302,10 +302,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         set_model_attn1_patch(model_options, self.patch_attn1.set_control(self))
         set_model_attn2_patch(model_options, self.patch_attn2.set_control(self))
 
-    # def patch_model(self, model: ModelPatcher):
-    #     model.set_model_attn1_patch(self.patch_attn1)
-    #     model.set_model_attn2_patch(self.patch_attn2)
-
     def set_cond_hint_inject(self, *args, **kwargs):
         to_return = super().set_cond_hint_inject(*args, **kwargs)
         # cond hint for LLLite needs to be scaled between (-1, 1) instead of (0, 1)

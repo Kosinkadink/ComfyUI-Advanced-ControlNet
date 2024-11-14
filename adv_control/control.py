@@ -316,6 +316,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.control_model_wrapped = create_sparse_modelpatcher(self.control_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
+        self.postpone_condhint_latents_check = True
         if self.control_model.use_simplified_conditioning_embedding:
             # TODO: allow vae_optional to be used instead of preprocessor
             #self.require_vae = True

@@ -457,7 +457,7 @@ class WeightTypeException(TypeError):
 
 
 class AdvancedControlBase:
-    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False, require_vae=False, allow_condhint_latents=False):
+    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_vae=False, allow_condhint_latents=False):
         self.base = base
         self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
         self.add_compatible_weight(weights_default.weight_type)
@@ -496,14 +496,11 @@ class AdvancedControlBase:
         # vae to store
         self.adv_vae = None
         # require model/vae to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
-        self.require_model = require_model
         self.require_vae = require_vae
         self.allow_condhint_latents = allow_condhint_latents
+        self.postpone_condhint_latents_check = False
         # disarm - when set to False, used to force usage of Apply Advanced ControlNet 🛂🅐🅒🅝 node (which will set it to True)
-        self.disarmed = not require_model
-    
-    def patch_model(self, model: ModelPatcher):
-        pass
+        self.disarmed = True
 
     def add_compatible_weight(self, control_weight_type: str):
         self.compatible_weights.append(control_weight_type)
@@ -874,4 +871,5 @@ class AdvancedControlBase:
         copied.adv_vae = self.adv_vae
         copied.require_vae = self.require_vae
         copied.allow_condhint_latents = self.allow_condhint_latents
+        copied.postpone_condhint_latents_check = self.postpone_condhint_latents_check
         copied.disarmed = self.disarmed

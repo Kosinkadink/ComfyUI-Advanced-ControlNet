@@ -396,6 +396,7 @@ def get_position_encoding_max_len(mm_state_dict: dict[str, Tensor], mm_name: str
     raise ValueError(f"No pos_encoder.pe found in SparseCtrl state_dict - {mm_name} is not a valid SparseCtrl model!")
 
 
+# TODO: replace with DinkLink reference from ADE
 class SparseCtrlMotionWrapper(nn.Module):
     def __init__(self, mm_state_dict: dict[str, Tensor], ops=disable_weight_init_clean_groupnorm):
         super().__init__()

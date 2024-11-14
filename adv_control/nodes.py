@@ -145,11 +145,13 @@ class AdvancedControlNetApply:
                         if is_advanced_controlnet(c_net):
                             # disarm node check
                             c_net.disarm()
-                            # if model required, verify model is passed in, and if so patch it
-                            if c_net.require_model:
-                                if not model_optional:
-                                    raise Exception(f"Type '{type(c_net).__name__}' requires model_optional input, but got None.")
-                                c_net.patch_model(model=model_optional)
+                            # check for allow_condhint_latents where vae_optional can't handle it itself
+                            if c_net.allow_condhint_latents and not c_net.require_vae:
+                                if not isinstance(control_hint, AbstractPreprocWrapper):
+                                    raise Exception(f"Type '{type(c_net).__name__}' requires proc_IMAGE input via a corresponding preprocessor, but received a normal Image instead.")
+                            else:
+                                if isinstance(control_hint, AbstractPreprocWrapper) and not c_net.postpone_condhint_latents_check:
+                                    raise Exception(f"Type '{type(c_net).__name__}' requires a normal Image input, but received a proc_IMAGE input instead.")
                             # if vae required, verify vae is passed in
                             if c_net.require_vae:
                                 # if controlnet can accept preprocced condhint latents and is the case, ignore vae requirement
