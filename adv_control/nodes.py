@@ -22,7 +22,8 @@ from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import (LoadImagesFromDirectory, ScaledSoftUniversalWeightsDeprecated,
                                SoftControlNetWeightsDeprecated, CustomControlNetWeightsDeprecated, 
                                SoftT2IAdapterWeightsDeprecated, CustomT2IAdapterWeightsDeprecated,
-                               AdvancedControlNetApplyDEPR, AdvancedControlNetApplySingleDEPR)
+                               AdvancedControlNetApplyDEPR, AdvancedControlNetApplySingleDEPR,
+                               ControlNetLoaderAdvancedDEPR, DiffControlNetLoaderAdvancedDEPR)
 from .logger import logger
 
 from .sampling import acn_sample_factory
@@ -45,8 +46,8 @@ NODE_CLASS_MAPPINGS = {
     "ACN_AdvancedControlNetApply_v2": AdvancedControlNetApply,
     "ACN_AdvancedControlNetApplySingle_v2": AdvancedControlNetApplySingle,
     # Loaders
-    "ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
-    "DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
+    "ACN_ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
+    "ACN_DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
     # Weights
     "ACN_ScaledSoftControlNetWeights": ScaledSoftUniversalWeights,
     "ScaledSoftMaskedUniversalWeights": ScaledSoftMaskedUniversalWeights,
@@ -82,6 +83,8 @@ NODE_CLASS_MAPPINGS = {
     "CustomT2IAdapterWeights": CustomT2IAdapterWeightsDeprecated,
     "ACN_AdvancedControlNetApply": AdvancedControlNetApplyDEPR,
     "ACN_AdvancedControlNetApplySingle": AdvancedControlNetApplySingleDEPR,
+    "ControlNetLoaderAdvanced": ControlNetLoaderAdvancedDEPR,
+    "DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvancedDEPR,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -97,8 +100,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ACN_AdvancedControlNetApply_v2": "Apply Advanced ControlNet 🛂🅐🅒🅝",
     "ACN_AdvancedControlNetApplySingle_v2": "Apply Advanced ControlNet(1) 🛂🅐🅒🅝",
     # Loaders
-    "ControlNetLoaderAdvanced": "Load Advanced ControlNet Model 🛂🅐🅒🅝",
-    "DiffControlNetLoaderAdvanced": "Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝",
+    "ACN_ControlNetLoaderAdvanced": "Load Advanced ControlNet Model 🛂🅐🅒🅝",
+    "ACN_DiffControlNetLoaderAdvanced": "Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝",
     # Weights
     "ACN_ScaledSoftControlNetWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
     "ScaledSoftMaskedUniversalWeights": "Scaled Soft Masked Weights 🛂🅐🅒🅝",
@@ -134,4 +137,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_AdvancedControlNetApply": "Apply Advanced ControlNet 🛂🅐🅒🅝",
     "ACN_AdvancedControlNetApplySingle": "Apply Advanced ControlNet(1) 🛂🅐🅒🅝",
+    "ControlNetLoaderAdvanced": "Load Advanced ControlNet Model 🛂🅐🅒🅝",
+    "DiffControlNetLoaderAdvanced": "Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝",
 }

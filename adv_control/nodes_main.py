@@ -14,10 +14,10 @@ class ControlNetLoaderAdvanced:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "control_net_name": (folder_paths.get_filename_list("controlnet"), ),
+                "cnet": (folder_paths.get_filename_list("controlnet"), ),
             },
             "optional": {
-                "tk_optional": ("TIMESTEP_KEYFRAME", ),
+                "_tk_opt": ("TIMESTEP_KEYFRAME", ),
             }
         }
 
@@ -26,14 +26,11 @@ class ControlNetLoaderAdvanced:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
-    def load_controlnet(self, control_net_name,
-                        tk_optional: TimestepKeyframeGroup=None,
-                        timestep_keyframe: TimestepKeyframeGroup=None,
+    def load_controlnet(self, cnet,
+                        _tk_opt: TimestepKeyframeGroup=None,
                         ):
-        if timestep_keyframe is not None: # backwards compatibility
-            tk_optional = timestep_keyframe
-        controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
-        controlnet = load_controlnet(controlnet_path, tk_optional)
+        controlnet_path = folder_paths.get_full_path("controlnet", cnet)
+        controlnet = load_controlnet(controlnet_path, _tk_opt)
         return (controlnet,)
     
 
@@ -43,10 +40,10 @@ class DiffControlNetLoaderAdvanced:
         return {
             "required": {
                 "model": ("MODEL",),
-                "control_net_name": (folder_paths.get_filename_list("controlnet"), )
+                "cnet": (folder_paths.get_filename_list("controlnet"), )
             },
             "optional": {
-                "tk_optional": ("TIMESTEP_KEYFRAME", ),
+                "_tk_opt": ("TIMESTEP_KEYFRAME", ),
             },
             "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
@@ -58,14 +55,11 @@ class DiffControlNetLoaderAdvanced:
 
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
-    def load_controlnet(self, control_net_name, model,
-                        tk_optional: TimestepKeyframeGroup=None,
-                        timestep_keyframe: TimestepKeyframeGroup=None
+    def load_controlnet(self, cnet, model,
+                        _tk_opt: TimestepKeyframeGroup=None,
                         ):
-        if timestep_keyframe is not None: # backwards compatibility
-            tk_optional = timestep_keyframe
-        controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
-        controlnet = load_controlnet(controlnet_path, tk_optional, model)
+        controlnet_path = folder_paths.get_full_path("controlnet", cnet)
+        controlnet = load_controlnet(controlnet_path, _tk_opt, model)
         if is_advanced_controlnet(controlnet):
             controlnet.verify_all_weights()
         return (controlnet,)
