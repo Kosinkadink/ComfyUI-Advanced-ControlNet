@@ -4,6 +4,7 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageOps
+from .nodes_main import AdvancedControlNetApply
 from .utils import BIGMAX, ControlWeights, TimestepKeyframeGroup, TimestepKeyframe, get_properly_arranged_t2i_weights
 from .logger import logger
 
@@ -249,3 +250,87 @@ class CustomT2IAdapterWeightsDeprecated:
         weights = get_properly_arranged_t2i_weights(weights)
         weights = ControlWeights.t2iadapter(weights_input=weights, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
+
+
+class AdvancedControlNetApplyDEPR:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "positive": ("CONDITIONING", ),
+                "negative": ("CONDITIONING", ),
+                "control_net": ("CONTROL_NET", ),
+                "image": ("IMAGE", ),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
+            },
+            "optional": {
+                "mask_optional": ("MASK", ),
+                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "latent_kf_override": ("LATENT_KEYFRAME", ),
+                "weights_override": ("CONTROL_NET_WEIGHTS", ),
+                "model_optional": ("MODEL",),
+                "vae_optional": ("VAE",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            }
+        }
+
+    DEPRECATED = True
+    RETURN_TYPES = ("CONDITIONING","CONDITIONING","MODEL",)
+    RETURN_NAMES = ("positive", "negative", "model_opt")
+    FUNCTION = "apply_controlnet"
+
+    CATEGORY = ""
+
+    def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent,
+                         mask_optional=None, model_optional=None, vae_optional=None,
+                         timestep_kf: TimestepKeyframeGroup=None, latent_kf_override=None,
+                         weights_override: ControlWeights=None, control_apply_to_uncond=False):
+        new_positive, new_negative = AdvancedControlNetApply.apply_controlnet(self, positive=positive, negative=negative, control_net=control_net, image=image,
+                                                          strength=strength, start_percent=start_percent, end_percent=end_percent,
+                                                          mask_optional=mask_optional, vae_optional=vae_optional,
+                                                          timestep_kf=timestep_kf, latent_kf_override=latent_kf_override, weights_override=weights_override,)
+        return (new_positive, new_negative, model_optional)
+
+
+class AdvancedControlNetApplySingleDEPR:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING", ),
+                "control_net": ("CONTROL_NET", ),
+                "image": ("IMAGE", ),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
+            },
+            "optional": {
+                "mask_optional": ("MASK", ),
+                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
+                "latent_kf_override": ("LATENT_KEYFRAME", ),
+                "weights_override": ("CONTROL_NET_WEIGHTS", ),
+                "model_optional": ("MODEL",),
+                "vae_optional": ("VAE",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            }
+        }
+
+    DEPRECATED = True
+    RETURN_TYPES = ("CONDITIONING","MODEL",)
+    RETURN_NAMES = ("CONDITIONING", "model_opt")
+    FUNCTION = "apply_controlnet"
+
+    CATEGORY = ""
+
+    def apply_controlnet(self, conditioning, control_net, image, strength, start_percent, end_percent,
+                         mask_optional=None, model_optional=None, vae_optional=None,
+                         timestep_kf: TimestepKeyframeGroup=None, latent_kf_override=None,
+                         weights_override: ControlWeights=None):
+        values = AdvancedControlNetApply.apply_controlnet(self, positive=conditioning, negative=None, control_net=control_net, image=image,
+                                                          strength=strength, start_percent=start_percent, end_percent=end_percent,
+                                                          mask_optional=mask_optional, vae_optional=vae_optional,
+                                                          timestep_kf=timestep_kf, latent_kf_override=latent_kf_override, weights_override=weights_override,
+                                                          control_apply_to_uncond=True)
+        return (values[0], model_optional)
