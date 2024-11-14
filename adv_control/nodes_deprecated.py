@@ -83,6 +83,8 @@ class ScaledSoftUniversalWeightsDeprecated:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -121,6 +123,8 @@ class SoftControlNetWeightsDeprecated:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -165,6 +169,8 @@ class CustomControlNetWeightsDeprecated:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -200,6 +206,8 @@ class SoftT2IAdapterWeightsDeprecated:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -233,6 +241,8 @@ class CustomT2IAdapterWeightsDeprecated:
             "optional": {
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -272,6 +282,8 @@ class AdvancedControlNetApplyDEPR:
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "model_optional": ("MODEL",),
                 "vae_optional": ("VAE",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -313,6 +325,8 @@ class AdvancedControlNetApplySingleDEPR:
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "model_optional": ("MODEL",),
                 "vae_optional": ("VAE",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }

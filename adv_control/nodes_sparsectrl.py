@@ -134,7 +134,7 @@ class RgbSparseCtrlPreprocessor:
                 "vae": ("VAE", ),
                 "latent_size": ("LATENT", ),
             },
-            "optional": {
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -168,7 +168,9 @@ class SparseWeightExtras:
                 "sparse_hint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "sparse_nonhint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "sparse_mask_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "autosize": ("ACNAUTOSIZE", {"padding": 50}),
+            },
+            "hidden": {
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     

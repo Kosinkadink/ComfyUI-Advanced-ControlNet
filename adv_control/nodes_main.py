@@ -47,7 +47,9 @@ class DiffControlNetLoaderAdvanced:
             },
             "optional": {
                 "tk_optional": ("TIMESTEP_KEYFRAME", ),
-                "autosize": ("ACNAUTOSIZE", {"padding": 160}),
+            },
+            "hidden": {
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
@@ -88,6 +90,8 @@ class AdvancedControlNetApply:
                 "latent_kf_override": ("LATENT_KEYFRAME", ),
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "vae_optional": ("VAE",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -189,8 +193,9 @@ class AdvancedControlNetApplySingle:
                 "timestep_kf": ("TIMESTEP_KEYFRAME", ),
                 "latent_kf_override": ("LATENT_KEYFRAME", ),
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
-                "model_optional": ("MODEL",),
                 "vae_optional": ("VAE",),
+            },
+            "hidden": {
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
@@ -202,12 +207,12 @@ class AdvancedControlNetApplySingle:
     CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
 
     def apply_controlnet(self, conditioning, control_net, image, strength, start_percent, end_percent,
-                         mask_optional: Tensor=None, model_optional: ModelPatcher=None, vae_optional=None,
+                         mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None):
         values = AdvancedControlNetApply.apply_controlnet(self, positive=conditioning, negative=None, control_net=control_net, image=image,
                                                           strength=strength, start_percent=start_percent, end_percent=end_percent,
-                                                          mask_optional=mask_optional, model_optional=model_optional, vae_optional=vae_optional,
+                                                          mask_optional=mask_optional, vae_optional=vae_optional,
                                                           timestep_kf=timestep_kf, latent_kf_override=latent_kf_override, weights_override=weights_override,
                                                           control_apply_to_uncond=True)
         return (values[0],)
