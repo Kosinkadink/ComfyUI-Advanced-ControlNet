@@ -31,6 +31,13 @@ def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_l
     return load_torch_file_with_dict
 
 
+class WrapperConsts:
+    ACN = "ACN"
+    VERSION = "version"
+    ACN_SAMPLER_SAMPLER_WRAPPER_KEY = "ACN_sampler_sample_wrapper"
+    CREATE_SAMPLER_SAMPLE_WRAPPER = "create_sampler_sample_wrapper"
+
+
 def get_properly_arranged_t2i_weights(initial_weights: list[float]):
     new_weights = []
     new_weights.extend([initial_weights[0]]*3)

@@ -7,6 +7,7 @@ from torch import Tensor
 
 import comfy.model_management
 import comfy.sample
+import comfy.hooks
 import comfy.model_patcher
 import comfy.utils
 from comfy.controlnet import ControlBase
@@ -46,6 +47,7 @@ RETURNED_CONTEXTREF_VERSION = 1
 class RefConst:
     OPTS = "refcn_opts"
     CREF_MODE = "contextref_mode"
+    REFCN_PRESENT_IN_CONDS = "refcn_present_in_conds"
 
 
 class MachineState:
@@ -142,7 +144,7 @@ class ReferencePreprocWrapper(AbstractPreprocWrapper):
 class ReferenceAdvanced(ControlBase, AdvancedControlBase):
     CHANNEL_TO_MULT = {320: 1, 640: 2, 1280: 4}
 
-    def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup):
+    def __init__(self, ref_opts: ReferenceOptions, timestep_keyframes: TimestepKeyframeGroup, extra_hooks: comfy.hooks.HookGroup=None):
         super().__init__()
         AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite(), allow_condhint_latents=True)
         # TODO: allow vae_optional to be used instead of preprocessor
@@ -155,6 +157,8 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.should_apply_adain_effective_strength = False
         self.should_apply_effective_masks = False
         self.latent_shape = None
+        # wrapper hooks
+        self.extra_hooks = extra_hooks.clone() if extra_hooks else self.import_and_create_wrapper_hooks()
         # ContextRef stuff
         self.is_context_ref = False
         self.contextref_cond_idx = -1
@@ -165,6 +169,10 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         if self._current_timestep_keyframe is not None and self._current_timestep_keyframe.has_control_weights():
             return self._current_timestep_keyframe.control_weights.extras.get(RefConst.OPTS, self._ref_opts)
         return self._ref_opts
+
+    def import_and_create_wrapper_hooks(self):
+        from .sampling import create_wrapper_hooks
+        return create_wrapper_hooks()
 
     def any_attn_strength_to_apply(self):
         return self.should_apply_attn_effective_strength or self.should_apply_effective_masks
@@ -280,6 +288,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.should_apply_effective_masks = self.latent_keyframes is not None or self.mask_cond_hint is not None or self.tk_mask_cond_hint is not None
         self.latent_shape = list(x_noisy.shape)
         # done preparing; model patches will take care of everything now.
+        transformer_options[RefConst.REFCN_PRESENT_IN_CONDS] = True
         # return normal controlnet stuff
         return control_prev
 
@@ -294,7 +303,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.should_apply_effective_masks = False
     
     def copy(self):
-        c = ReferenceAdvanced(self.ref_opts, self.timestep_keyframes)
+        c = ReferenceAdvanced(self.ref_opts, self.timestep_keyframes, self.extra_hooks)
         c.order = self.order
         c.is_context_ref = self.is_context_ref
         self.copy_to(c)
@@ -741,7 +750,11 @@ def factory_forward_inject_UNetModel(reference_injections: ReferenceInjections):
             reference_injections.clean_contextref_module_mem()
             context_controlnets = []
         # discard any controlnets that should not run
-        ref_controlnets = [z for z in ref_controlnets if z.should_run()]
+        refcn_present_in_conds = transformer_options.get(RefConst.REFCN_PRESENT_IN_CONDS, False)
+        if refcn_present_in_conds:
+            ref_controlnets = [z for z in ref_controlnets if z.should_run()]
+        else:
+            ref_controlnets = []
         context_controlnets = [z for z in context_controlnets if z.should_run()]
         # if nothing related to reference controlnets, do nothing special
         if len(ref_controlnets) == 0 and len(context_controlnets) == 0:

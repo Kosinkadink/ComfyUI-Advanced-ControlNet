@@ -1,6 +1,8 @@
 from typing import Callable, Union
 
+import comfy.hooks
 import comfy.model_patcher
+import comfy.patcher_extension
 import comfy.sample
 import comfy.samplers
 from comfy.model_patcher import ModelPatcher
@@ -16,7 +18,7 @@ from .control_reference import (ReferenceAdvanced, ReferenceInjections,
                                 handle_context_ref_setup,
                                 REF_CONTROL_LIST_ALL, CONTEXTREF_CLEAN_FUNC)
 from .control_lllite import (ControlLLLiteAdvanced)
-from .utils import torch_dfs
+from .utils import torch_dfs, WrapperConsts
 
 
 def support_sliding_context_windows(conds) -> tuple[bool, list[dict]]:
@@ -70,6 +72,25 @@ def get_lllitecn(control: ControlBase):
     cn_dict.update(get_lllitecn(control.previous_controlnet))
     return cn_dict
 
+def should_register_sampler_sampler_wrapper(hook, model, model_options: dict, target, registered: list):
+    wrappers = comfy.patcher_extension.get_wrappers_with_key(comfy.patcher_extension.WrappersMP.SAMPLER_SAMPLE,
+                                                  WrapperConsts.ACN_SAMPLER_SAMPLER_WRAPPER_KEY,
+                                                  model_options, is_model_options=True)
+    return len(wrappers) == 0
+
+def create_wrapper_hooks():
+    wrappers = {}
+    comfy.patcher_extension.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.SAMPLER_SAMPLE,
+                                                 WrapperConsts.ACN_SAMPLER_SAMPLER_WRAPPER_KEY,
+                                                 acn_sampler_sample_wrapper,
+                                                 transformer_options=wrappers)
+    hooks = comfy.hooks.HookGroup()
+    hook = comfy.hooks.WrapperHook(wrappers)
+    hook.hook_id = WrapperConsts.ACN_SAMPLER_SAMPLER_WRAPPER_KEY
+    hook.custom_should_register = should_register_sampler_sampler_wrapper
+    hooks.add(hook)
+    return hooks
+
 def acn_sampler_sample_wrapper(executor, *args, **kwargs):
     controlnets_modified = False
     guider: comfy.samplers.CFGGuider = args[0]
@@ -78,10 +99,11 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
     orig_conds = guider.conds
     orig_model_options = extra_args["model_options"]
     try:
+        new_model_options = orig_model_options
         # if context options present, perform some special actions that may be required
         context_refs = []
         if has_sliding_context_windows(guider.model_patcher):
-            extra_args["model_options"] = comfy.model_patcher.create_model_options_clone(orig_model_options)
+            new_model_options = comfy.model_patcher.create_model_options_clone(new_model_options)
             # convert all CNs to Advanced if needed
             controlnets_modified, conds = support_sliding_context_windows(orig_conds.values())
             if controlnets_modified:
@@ -89,24 +111,23 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
             # enable ContextRef, if requested
             existing_contextref_obj = get_contextref_obj(guider.model_patcher)
             if existing_contextref_obj is not None:
-                context_refs = handle_context_ref_setup(existing_contextref_obj, extra_args["model_options"]["transformer_options"], guider.conds.values())
+                context_refs = handle_context_ref_setup(existing_contextref_obj, new_model_options["transformer_options"], guider.conds.values())
                 controlnets_modified = True
         # look for Advanced ControlNets that will require intervention to work
         ref_set = set()
         lllite_dict: dict[ControlLLLiteAdvanced, None] = {} # dicts preserve insertion order since py3.7
         for outer_cond in guider.conds.values():
             for cond in outer_cond:
-                if "control" in cond[1]:
-                    ref_set.update(get_refcn(cond[1]["control"]))
-                    lllite_dict.update(get_lllitecn(cond[1]["control"]))
+                if "control" in cond:
+                    ref_set.update(get_refcn(cond["control"]))
+                    lllite_dict.update(get_lllitecn(cond["control"]))
         # if lllite found, apply patches to a cloned model_options, and continue
         if len(lllite_dict) > 0:
             lllite_list = list(lllite_dict.keys())
-            model.model_options = model.model_options.copy()
-            model.model_options["transformer_options"] = model.model_options["transformer_options"].copy()
+            new_model_options = comfy.model_patcher.create_model_options_clone(new_model_options)
             lllite_list.reverse() # reverse so that patches will be applied in expected order
             for lll in lllite_list:
-                lll.live_model_patches(model.model_options)
+                lll.live_model_patches(new_model_options)
         # if no ref cn found, do original function immediately
         if len(ref_set) == 0 and len(context_refs) == 0:
             return executor(*args, **kwargs)
@@ -174,12 +195,11 @@ def acn_sampler_sample_wrapper(executor, *args, **kwargs):
             reference_injections.diffusion_model_orig_forward = model.model.diffusion_model.forward
             model.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(model.model.diffusion_model, type(model.model.diffusion_model))
             # store ordered ref cns in model's transformer options
-            new_model_options = model.model_options.copy()
-            new_model_options["transformer_options"] = model.model_options["transformer_options"].copy()
+            new_model_options = comfy.model_patcher.create_model_options_clone(new_model_options)
             ref_list: list[ReferenceAdvanced] = list(ref_set)
             new_model_options["transformer_options"][REF_CONTROL_LIST_ALL] = sorted(ref_list, key=lambda x: x.order)
             new_model_options["transformer_options"][CONTEXTREF_CLEAN_FUNC] = reference_injections.clean_contextref_module_mem
-            model.model_options = new_model_options
+            extra_args["model_options"] = new_model_options
             # continue with original function
             return executor(*args, **kwargs)
         finally:
