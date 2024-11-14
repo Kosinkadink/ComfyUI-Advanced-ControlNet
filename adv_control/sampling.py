@@ -17,7 +17,6 @@ from .control_reference import (ReferenceAdvanced, ReferenceInjections,
                                 _forward_inject_BasicTransformerBlock, factory_forward_inject_UNetModel,
                                 handle_context_ref_setup,
                                 REF_CONTROL_LIST_ALL, CONTEXTREF_CLEAN_FUNC)
-from .control_lllite import (ControlLLLiteAdvanced)
 from .utils import torch_dfs, WrapperConsts
 
 
@@ -63,14 +62,6 @@ def get_refcn(control: ControlBase, order: int=-1):
     ref_set.update(get_refcn(control.previous_controlnet, order=order))
     return ref_set
 
-def get_lllitecn(control: ControlBase):
-    cn_dict: dict[ControlLLLiteAdvanced,None] = {}
-    if control is None:
-        return cn_dict
-    if type(control) == ControlLLLiteAdvanced:
-        cn_dict[control] = None
-    cn_dict.update(get_lllitecn(control.previous_controlnet))
-    return cn_dict
 
 def should_register_outer_sample_wrapper(hook, model, model_options: dict, target, registered: list):
     wrappers = comfy.patcher_extension.get_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
@@ -114,19 +105,10 @@ def acn_outer_sample_wrapper(executor, *args, **kwargs):
                 controlnets_modified = True
         # look for Advanced ControlNets that will require intervention to work
         ref_set = set()
-        lllite_dict: dict[ControlLLLiteAdvanced, None] = {} # dicts preserve insertion order since py3.7
         for outer_cond in guider.conds.values():
             for cond in outer_cond:
                 if "control" in cond:
                     ref_set.update(get_refcn(cond["control"]))
-                    lllite_dict.update(get_lllitecn(cond["control"]))
-        # if lllite found, apply patches to a cloned model_options, and continue
-        if len(lllite_dict) > 0:
-            lllite_list = list(lllite_dict.keys())
-            new_model_options = comfy.model_patcher.create_model_options_clone(new_model_options)
-            lllite_list.reverse() # reverse so that patches will be applied in expected order
-            for lll in lllite_list:
-                lll.live_model_patches(new_model_options)
         # if no ref cn found, do original function immediately
         if len(ref_set) == 0 and len(context_refs) == 0:
             return executor(*args, **kwargs)

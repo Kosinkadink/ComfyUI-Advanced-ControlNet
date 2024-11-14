@@ -19,8 +19,8 @@ from .utils import (AdvancedControlBase, TimestepKeyframeGroup, ControlWeights, 
 
 
 # based on set_model_patch code in comfy/model_patcher.py
-def set_model_patch(model_options, patch, name):
-    to = model_options["transformer_options"]
+def set_model_patch(transformer_options, patch, name):
+    to = transformer_options
     # check if patch was already added
     if "patches" in to:
         current_patches = to["patches"].get(name, [])
@@ -30,11 +30,11 @@ def set_model_patch(model_options, patch, name):
         to["patches"] = {}
     to["patches"][name] = to["patches"].get(name, []) + [patch]
 
-def set_model_attn1_patch(model_options, patch):
-    set_model_patch(model_options, patch, "attn1_patch")
+def set_model_attn1_patch(transformer_options, patch):
+    set_model_patch(transformer_options, patch, "attn1_patch")
 
-def set_model_attn2_patch(model_options, patch):
-    set_model_patch(model_options, patch, "attn2_patch")
+def set_model_attn2_patch(transformer_options, patch):
+    set_model_patch(transformer_options, patch, "attn2_patch")
 
 
 def extra_options_to_module_prefix(extra_options):
@@ -298,10 +298,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.latent_dims_div2 = None
         self.latent_dims_div4 = None
 
-    def live_model_patches(self, model_options):
-        set_model_attn1_patch(model_options, self.patch_attn1.set_control(self))
-        set_model_attn2_patch(model_options, self.patch_attn2.set_control(self))
-
     def set_cond_hint_inject(self, *args, **kwargs):
         to_return = super().set_cond_hint_inject(*args, **kwargs)
         # cond hint for LLLite needs to be scaled between (-1, 1) instead of (0, 1)
@@ -315,7 +311,7 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.patch_attn2.set_control(self)
         #logger.warn(f"in pre_run_advanced: {id(self)}")
     
-    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options):
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options: dict):
         # normal ControlNet stuff
         control_prev = None
         if self.previous_controlnet is not None:
@@ -368,7 +364,9 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
             self.latent_dims_div4 = (new_h, new_w)
         # prepare mask
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
-        # done preparing; model patches will take care of everything now.
+        # done preparing; model patches will take care of everything now
+        set_model_attn1_patch(transformer_options, self.patch_attn1.set_control(self))
+        set_model_attn2_patch(transformer_options, self.patch_attn2.set_control(self))
         # return normal controlnet stuff
         return control_prev
     
