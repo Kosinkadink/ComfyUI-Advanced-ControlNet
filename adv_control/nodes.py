@@ -140,6 +140,9 @@ class AdvancedControlNetApply:
                     if prev_cnet in cnets:
                         c_net = cnets[prev_cnet]
                     else:
+                        # make sure control_net is not None to avoid confusing error messages
+                        if control_net is None:
+                            raise Exception("Passed in control_net is None; something must have went wrong when loading it from a Load ControlNet node.")
                         # copy, convert to advanced if needed, and set cond
                         c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent), vae_optional)
                         if is_advanced_controlnet(c_net):

@@ -504,6 +504,8 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             control = comfy_cn.load_controlnet(ckpt_path, model=model)
         finally:
             comfy.utils.load_torch_file = orig_load_torch_file
+    if control is None:
+        raise Exception(f"Something went wrong when loading '{ckpt_path}'; ControlNet is None.")
     return convert_to_advanced(control, timestep_keyframe=timestep_keyframe)
 
 
