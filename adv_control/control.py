@@ -129,7 +129,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                                   global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, load_device=v.load_device,
                                   manual_cast_dtype=v.manual_cast_dtype)
         v.copy_to(to_return)
-        to_return.control_model_wrapped = v.control_model_wrapped.clone()
+        to_return.control_model_wrapped = v.control_model_wrapped.clone() # needed to avoid breaking memory management system (parent tracking)
         return to_return
 
 
