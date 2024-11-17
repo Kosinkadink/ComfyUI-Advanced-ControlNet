@@ -14,8 +14,8 @@ from .control import convert_all_to_advanced, restore_all_controlnet_conns
 from .control_reference import (ReferenceAdvanced, ReferenceInjections,
                                 RefBasicTransformerBlock, RefTimestepEmbedSequential,
                                 InjectionBasicTransformerBlockHolder, InjectionTimestepEmbedSequentialHolder,
-                                _forward_inject_BasicTransformerBlock, factory_forward_inject_UNetModel,
-                                handle_context_ref_setup,
+                                _forward_inject_BasicTransformerBlock,
+                                handle_context_ref_setup, handle_reference_injection,
                                 REF_CONTROL_LIST_ALL, CONTEXTREF_CLEAN_FUNC)
 from .utils import torch_dfs, WrapperConsts
 
@@ -172,11 +172,11 @@ def acn_outer_sample_wrapper(executor, *args, **kwargs):
             for i, module in enumerate(reference_injections.gn_modules):
                 module.injection_holder.gn_weight *= 2
 
-            # handle diffusion_model forward injection
-            reference_injections.diffusion_model_orig_forward = model.model.diffusion_model.forward
-            model.model.diffusion_model.forward = factory_forward_inject_UNetModel(reference_injections).__get__(model.model.diffusion_model, type(model.model.diffusion_model))
             # store ordered ref cns in model's transformer options
             new_model_options = comfy.model_patcher.create_model_options_clone(new_model_options)
+            # handle diffusion_model forward injection
+            handle_reference_injection(new_model_options, reference_injections)
+
             ref_list: list[ReferenceAdvanced] = list(ref_set)
             new_model_options["transformer_options"][REF_CONTROL_LIST_ALL] = sorted(ref_list, key=lambda x: x.order)
             new_model_options["transformer_options"][CONTEXTREF_CLEAN_FUNC] = reference_injections.clean_contextref_module_mem
@@ -199,8 +199,6 @@ def acn_outer_sample_wrapper(executor, *args, **kwargs):
                 module.injection_holder.clean_all()
                 del module.injection_holder
             del gn_modules
-            # restore diffusion_model forward function
-            model.model.diffusion_model.forward = reference_injections.diffusion_model_orig_forward.__get__(model.model.diffusion_model, type(model.model.diffusion_model))
             # cleanup
             reference_injections.cleanup()
     finally:
