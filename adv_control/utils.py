@@ -504,6 +504,8 @@ class AdvancedControlBase:
         # vae to store
         self.adv_vae = None
         self.mult_by_ratio_when_vae = True
+        # compression ratio stuff
+        self.real_compression_ratio = None
         # require model/vae to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
         self.require_vae = require_vae
         self.allow_condhint_latents = allow_condhint_latents
@@ -634,6 +636,9 @@ class AdvancedControlBase:
         # for each timestep keyframe, calculate the start_t
         for tk in self.timestep_keyframes.keyframes:
             tk.start_t = percent_to_timestep_function(tk.start_percent)
+        # set real_compression_ratio to compression_ratio
+        if hasattr(self, "compression_ratio"):
+            self.real_compression_ratio = self.compression_ratio
         # clear variables
         self.cleanup_advanced()
 
@@ -857,6 +862,9 @@ class AdvancedControlBase:
         self.batch_size = 0
         self.weights = None
         self.latent_keyframes = None
+        # set effective_compression_ratio to compression_ratio
+        if hasattr(self, "compression_ratio"):
+            self.real_compression_ratio = self.compression_ratio
         # timestep stuff
         self._current_timestep_keyframe = None
         self._current_timestep_index = -1

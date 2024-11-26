@@ -61,10 +61,11 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
         # make cond_hint appropriate dimensions
         # TODO: change this to not require cond_hint upscaling every step when self.sub_idxs are present
-        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * self.compression_ratio != self.cond_hint.shape[2] or x_noisy.shape[3] * self.compression_ratio != self.cond_hint.shape[3]:
+        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * self.real_compression_ratio != self.cond_hint.shape[2] or x_noisy.shape[3] * self.real_compression_ratio != self.cond_hint.shape[3]:
             if self.cond_hint is not None:
                 del self.cond_hint
             self.cond_hint = None
+            self.real_compression_ratio = self.compression_ratio
             compression_ratio = self.compression_ratio
             if self.vae is not None and self.mult_by_ratio_when_vae:
                 compression_ratio *= self.vae.downscale_ratio
@@ -80,6 +81,8 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 loaded_models = comfy.model_management.loaded_models(only_currently_used=True)
                 self.cond_hint = self.vae.encode(self.cond_hint.movedim(1, -1))
                 comfy.model_management.load_models_gpu(loaded_models)
+                if not self.mult_by_ratio_when_vae:
+                    self.real_compression_ratio = 1
             if self.latent_format is not None:
                 self.cond_hint = self.latent_format.process_in(self.cond_hint)
             self.cond_hint = self.cond_hint.to(device=x_noisy.device, dtype=dtype)
