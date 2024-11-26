@@ -139,7 +139,7 @@ class AdvancedControlNetApply:
                                     pass
                                 elif not vae_optional:
                                     # make sure SD3 ControlNet will get a special message instead of generic type mention
-                                    if is_sd3_advanced_controlnet:
+                                    if is_sd3_advanced_controlnet(c_net):
                                         raise Exception(f"SD3 ControlNet requires vae_optional input, but got None.")
                                     else:
                                         raise Exception(f"Type '{type(c_net).__name__}' requires vae_optional input, but got None.")

@@ -10,6 +10,7 @@ from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolati
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
 from .nodes_reference import ReferenceControlNetNode, ReferenceControlFinetune, ReferencePreprocessorNode
 from .nodes_plusplus import PlusPlusLoaderAdvanced, PlusPlusLoaderSingle, PlusPlusInputNode
+from .nodes_ctrlora import CtrLoRALoader
 from .nodes_loosecontrol import ControlNetLoaderWithLoraAdvanced
 from .nodes_deprecated import (LoadImagesFromDirectory, ScaledSoftUniversalWeightsDeprecated,
                                SoftControlNetWeightsDeprecated, CustomControlNetWeightsDeprecated, 
@@ -55,6 +56,8 @@ NODE_CLASS_MAPPINGS = {
     "ACN_ControlNet++LoaderSingle": PlusPlusLoaderSingle,
     "ACN_ControlNet++LoaderAdvanced": PlusPlusLoaderAdvanced,
     "ACN_ControlNet++InputNode": PlusPlusInputNode,
+    # CtrLoRA
+    "ACN_CtrLoRALoader": CtrLoRALoader,
     # Reference
     "ACN_ReferencePreprocessor": ReferencePreprocessorNode,
     "ACN_ReferenceControlNet": ReferenceControlNetNode,
@@ -109,6 +112,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ACN_ControlNet++LoaderSingle": "Load ControlNet++ Model (Single) 🛂🅐🅒🅝",
     "ACN_ControlNet++LoaderAdvanced": "Load ControlNet++ Model (Multi) 🛂🅐🅒🅝",
     "ACN_ControlNet++InputNode": "ControlNet++ Input 🛂🅐🅒🅝",
+    # CtrLoRA
+    "ACN_CtrLoRALoader": "Load CtrLoRA Model 🛂🅐🅒🅝",
     # Reference
     "ACN_ReferencePreprocessor": "Reference Preproccessor 🛂🅐🅒🅝",
     "ACN_ReferenceControlNet": "Reference ControlNet 🛂🅐🅒🅝",

@@ -57,6 +57,7 @@ class ControlWeightType:
     CONTROLLLLITE = "controllllite"
     SVD_CONTROLNET = "svd_controlnet"
     SPARSECTRL = "sparsectrl"
+    CTRLORA = "ctrlora"
 
 
 class ControlWeights:
@@ -502,6 +503,7 @@ class AdvancedControlBase:
         self.set_cond_hint = self.set_cond_hint_inject
         # vae to store
         self.adv_vae = None
+        self.mult_by_ratio_when_vae = True
         # require model/vae to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
         self.require_vae = require_vae
         self.allow_condhint_latents = allow_condhint_latents
@@ -615,11 +617,13 @@ class AdvancedControlBase:
             for arg in args:
                 if isinstance(arg, VAE):
                     self.adv_vae = arg
+                    self.vae = arg
                     break
             # if not in args, check kwargs now
             if self.adv_vae is None:
                 if 'vae' in kwargs:
                     self.adv_vae = kwargs['vae']
+                    self.vae = kwargs['vae']
         return to_return
 
     def pre_run_inject(self, model, percent_to_timestep_function):
@@ -876,6 +880,7 @@ class AdvancedControlBase:
         copied.weights_override = self.weights_override
         copied.latent_keyframe_override = self.latent_keyframe_override
         copied.adv_vae = self.adv_vae
+        copied.mult_by_ratio_when_vae = self.mult_by_ratio_when_vae
         copied.require_vae = self.require_vae
         copied.allow_condhint_latents = self.allow_condhint_latents
         copied.postpone_condhint_latents_check = self.postpone_condhint_latents_check

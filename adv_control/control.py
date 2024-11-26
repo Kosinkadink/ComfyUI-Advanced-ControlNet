@@ -66,7 +66,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 del self.cond_hint
             self.cond_hint = None
             compression_ratio = self.compression_ratio
-            if self.vae is not None:
+            if self.vae is not None and self.mult_by_ratio_when_vae:
                 compression_ratio *= self.vae.downscale_ratio
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
             if self.sub_idxs is not None:
@@ -483,6 +483,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
         # ControlNet++ check
         elif "task_embedding" in key:
             pass
+        # CtrLoRA check
+        elif "lora_layer" in key:
+            controlnet_type = ControlWeightType.CTRLORA
+            break
 
     if has_controlnet_key and has_motion_modules_key:
         controlnet_type = ControlWeightType.SPARSECTRL
@@ -496,6 +500,8 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             control = load_sparsectrl(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe, model=model)
         elif controlnet_type == ControlWeightType.SVD_CONTROLNET:
             control = load_svdcontrolnet(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
+        elif controlnet_type == ControlWeightType.CTRLORA:
+            raise Exception("This is a CtrLoRA; use the Load CtrLoRA Model node.")
     # otherwise, load vanilla ControlNet
     else:
         try:
