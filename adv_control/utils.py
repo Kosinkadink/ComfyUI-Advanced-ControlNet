@@ -64,7 +64,8 @@ class ControlWeights:
     def __init__(self, weight_type: str, base_multiplier: float=1.0,
                  weights_input: list[float]=None, weights_middle: list[float]=None, weights_output: list[float]=None,
                  weight_func: Callable=None, weight_mask: Tensor=None,
-                 uncond_multiplier=1.0, uncond_mask: Tensor=None, extras: dict[str]={},):
+                 uncond_multiplier=1.0, uncond_mask: Tensor=None,
+                 extras: dict[str]={}, disable_applied_to=False):
         self.weight_type = weight_type
         self.base_multiplier = base_multiplier
         self.weights_input = weights_input
@@ -77,6 +78,7 @@ class ControlWeights:
         self.uncond_mask = uncond_mask if uncond_mask is not None else 1.0
         self.has_uncond_mask = uncond_mask is not None
         self.extras = extras
+        self.disable_applied_to = disable_applied_to
 
     def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
         # if weight_func present, use it
@@ -103,7 +105,8 @@ class ControlWeights:
         return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier,
                               weights_input=new_weights_input, weights_middle=new_weights_middle, weights_output=new_weights_output,
                               weight_func=new_weight_func, weight_mask=self.weight_mask,
-                              uncond_multiplier=self.uncond_multiplier, extras=self.extras)
+                              uncond_multiplier=self.uncond_multiplier,
+                              extras=self.extras, disable_applied_to=self.disable_applied_to)
 
     @classmethod
     def default(cls, extras: dict[str]={}):
@@ -111,27 +114,27 @@ class ControlWeights:
 
     @classmethod
     def universal(cls, base_multiplier: float, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=extras)
+        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, disable_applied_to=True, extras=extras)
     
     @classmethod
     def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, extras=extras)
+        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, disable_applied_to=True, extras=extras)
 
     @classmethod
-    def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
 
     @classmethod
-    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
     
     @classmethod
-    def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
     
     @classmethod
-    def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
 
 
 class StrengthInterpolation:
@@ -667,7 +670,7 @@ class AdvancedControlBase:
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
         if self.strength == 0.0 or self._current_timestep_keyframe.strength == 0.0:
-            return self.default_control_actions(x_noisy, t, cond, batched_number)
+            return self.default_control_actions(x_noisy, t, cond, batched_number, transformer_options)
         # otherwise, perform normal function
         return self.get_control_advanced(x_noisy, t, cond, batched_number, transformer_options)
 
@@ -781,6 +784,10 @@ class AdvancedControlBase:
                 if x is not None:
                     if self.global_average_pooling:
                         x = torch.mean(x, dim=(2, 3), keepdim=True).repeat(1, 1, x.shape[2], x.shape[3])
+
+                    # if should disable applied_to optimization, clone the weight if in applied_to
+                    if self.weights.disable_applied_to and x in applied_to:
+                        x = x.clone()
 
                     if x not in applied_to: #memory saving strategy, allow shared tensors and only apply strength to shared tensors once
                         applied_to.add(x)
