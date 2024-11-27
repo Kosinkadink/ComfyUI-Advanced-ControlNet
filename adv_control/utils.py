@@ -247,9 +247,10 @@ class TimestepKeyframe:
 
 # always maintain sorted state (by start_percent of TimestepKeyFrame)
 class TimestepKeyframeGroup:
-    def __init__(self) -> None:
+    def __init__(self, add_default=True) -> None:
         self.keyframes: list[TimestepKeyframe] = []
-        self.keyframes.append(TimestepKeyframe.default())
+        if add_default:
+            self.keyframes.append(TimestepKeyframe.default())
 
     def add(self, keyframe: TimestepKeyframe) -> None:
         # add to end of list, then sort
@@ -275,7 +276,7 @@ class TimestepKeyframeGroup:
         return len(self.keyframes) == 0
     
     def clone(self) -> 'TimestepKeyframeGroup':
-        cloned = TimestepKeyframeGroup()
+        cloned = TimestepKeyframeGroup(add_default=False)
         # already sorted, so don't use add function to make cloning quicker
         for tk in self.keyframes:
             cloned.keyframes.append(tk)
