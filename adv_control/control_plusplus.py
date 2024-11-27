@@ -22,7 +22,7 @@ import comfy.model_management
 import comfy.model_detection
 import comfy.utils
 
-from .utils import (AdvancedControlBase, ControlWeights, ControlWeightType, TimestepKeyframeGroup, AbstractPreprocWrapper,
+from .utils import (AdvancedControlBase, ControlWeights, ControlWeightType, TimestepKeyframeGroup, AbstractPreprocWrapper, Extras,
                     extend_to_batch_size, broadcast_image_to_extend)
 from .logger import logger
 
@@ -239,7 +239,7 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
     def get_universal_weights(self) -> ControlWeights:
         def cn_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
             if key == "middle":
-                return 1.0
+                return 1.0 * self.weights.extras.get(Extras.MIDDLE_MULT, 1.0)
             c_len = len(control[key])
             raw_weights = [(self.weights.base_multiplier ** float((c_len) - i)) for i in range(c_len+1)]
             raw_weights = raw_weights[:-1]

@@ -14,7 +14,7 @@ from comfy.model_patcher import ModelPatcher
 from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseSettings, SparseConst, create_sparse_modelpatcher
 from .control_lllite import LLLiteModule, LLLitePatch, load_controllllite
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
-from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException,
+from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException, Extras,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
                     broadcast_image_to_extend, extend_to_batch_size, ORIG_PREVIOUS_CONTROLNET, CONTROL_INIT_BY_ACN)
 from .logger import logger
@@ -30,7 +30,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
     def get_universal_weights(self) -> ControlWeights:
         def cn_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
             if key == "middle":
-                return 1.0
+                return 1.0 * self.weights.extras.get(Extras.MIDDLE_MULT, 1.0)
             c_len = len(control[key])
             raw_weights = [(self.weights.base_multiplier ** float((c_len) - i)) for i in range(c_len+1)]
             raw_weights = raw_weights[:-1]
@@ -155,7 +155,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
     def get_universal_weights(self) -> ControlWeights:
         def t2i_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
             if key == "middle":
-                return 1.0
+                return 1.0 * self.weights.extras.get(Extras.MIDDLE_MULT, 1.0)
             c_len = 8 #len(control[key])
             raw_weights = [(self.weights.base_multiplier ** float((c_len-1) - i)) for i in range(c_len)]
             raw_weights = [raw_weights[-c_len], raw_weights[-3], raw_weights[-2], raw_weights[-1]]

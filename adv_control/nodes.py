@@ -4,7 +4,7 @@ from .nodes_main import (ControlNetLoaderAdvanced, DiffControlNetLoaderAdvanced,
                          AdvancedControlNetApply, AdvancedControlNetApplySingle)
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights,
                            SoftControlNetWeightsSD15, CustomControlNetWeightsSD15, CustomControlNetWeightsFlux,
-                           SoftT2IAdapterWeights, CustomT2IAdapterWeights)
+                           SoftT2IAdapterWeights, CustomT2IAdapterWeights, ExtrasMiddleMultNode)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
                               TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
@@ -45,6 +45,7 @@ NODE_CLASS_MAPPINGS = {
     "ACN_SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "ACN_CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
+    "ACN_ExtrasMiddleMult": ExtrasMiddleMultNode,
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": RgbSparseCtrlPreprocessor,
     "ACN_SparseCtrlLoaderAdvanced": SparseCtrlLoaderAdvanced,
@@ -101,6 +102,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ACN_SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "ACN_CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Default Weights 🛂🅐🅒🅝",
+    "ACN_ExtrasMiddleMult": "Middle Weight Extras 🛂🅐🅒🅝",
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
     "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",

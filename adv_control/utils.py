@@ -22,6 +22,9 @@ BIGMAX = (2**53-1)
 ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
 CONTROL_INIT_BY_ACN = "_control_init_by_ACN"
 
+class Extras:
+    MIDDLE_MULT = "middle_mult"
+
 
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
@@ -77,17 +80,19 @@ class ControlWeights:
         self.has_uncond_multiplier = not math.isclose(self.uncond_multiplier, 1.0)
         self.uncond_mask = uncond_mask if uncond_mask is not None else 1.0
         self.has_uncond_mask = uncond_mask is not None
-        self.extras = extras
+        self.extras = extras.copy()
         self.disable_applied_to = disable_applied_to
 
     def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
         # if weight_func present, use it
         if self.weight_func is not None:
             return self.weight_func(idx=idx, control=control, key=key)
+        effective_mult = 1.0
         # if weights is not none, return index
         relevant_weights = None
         if key == "middle":
             relevant_weights = self.weights_middle
+            effective_mult *= self.extras.get(Extras.MIDDLE_MULT, 1.0)
         elif key == "input":
             relevant_weights = self.weights_input
             if relevant_weights is not None:
@@ -95,10 +100,10 @@ class ControlWeights:
         else:
             relevant_weights = self.weights_output
         if relevant_weights is None:
-            return default
+            return default * effective_mult
         elif idx >= len(relevant_weights):
-            return default
-        return relevant_weights[idx]
+            return default * effective_mult
+        return relevant_weights[idx] * effective_mult
 
     def copy_with_new_weights(self, new_weights_input: list[float]=None, new_weights_middle: list[float]=None, new_weights_output: list[float]=None,
                               new_weight_func: Callable=None):
