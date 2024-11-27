@@ -8,7 +8,7 @@ import comfy.utils
 import comfy.model_management
 import comfy.model_detection
 import comfy.controlnet as comfy_cn
-from comfy.controlnet import ControlBase, ControlNet, ControlLora, T2IAdapter, StrengthType
+from comfy.controlnet import ControlBase, ControlNet, ControlNetSD35, ControlLora, T2IAdapter, StrengthType
 from comfy.model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseSettings, SparseConst, create_sparse_modelpatcher
@@ -21,9 +21,11 @@ from .logger import logger
 
 
 class ControlNetAdvanced(ControlNet, AdvancedControlBase):
-    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, load_device=None, manual_cast_dtype=None, extra_conds=["y"], strength_type=StrengthType.CONSTANT):
-        super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, compression_ratio=compression_ratio, latent_format=latent_format, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
-        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
+    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, global_average_pooling=False, compression_ratio=8, latent_format=None, load_device=None, manual_cast_dtype=None,
+                 extra_conds=["y"], strength_type=StrengthType.CONSTANT, concat_mask=False, preprocess_image=lambda a: a):
+        super().__init__(control_model=control_model, global_average_pooling=global_average_pooling, compression_ratio=compression_ratio, latent_format=latent_format, load_device=load_device, manual_cast_dtype=manual_cast_dtype,
+                         extra_conds=extra_conds, strength_type=strength_type, concat_mask=concat_mask, preprocess_image=preprocess_image)
+        AdvancedControlBase.__init__(self, super(type(self), self), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
         self.is_flux = False
         self.x_noisy_shape = None
 
@@ -77,6 +79,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, self.upscale_algorithm, "center")
             else:
                 self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, self.upscale_algorithm, "center")
+            self.cond_hint = self.preprocess_image(self.cond_hint)
             if self.vae is not None:
                 loaded_models = comfy.model_management.loaded_models(only_currently_used=True)
                 self.cond_hint = self.vae.encode(self.cond_hint.movedim(1, -1))
@@ -85,6 +88,14 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                     self.real_compression_ratio = 1
             if self.latent_format is not None:
                 self.cond_hint = self.latent_format.process_in(self.cond_hint)
+            if len(self.extra_concat_orig) > 0:
+                to_concat = []
+                for c in self.extra_concat_orig:
+                    c = c.to(self.cond_hint.device)
+                    c = comfy.utils.common_upscale(c, self.cond_hint.shape[3], self.cond_hint.shape[2], self.upscale_algorithm, "center")
+                    to_concat.append(comfy.utils.repeat_to_batch_size(c, self.cond_hint.shape[0]))
+                self.cond_hint = torch.cat([self.cond_hint] + to_concat, dim=1)
+
             self.cond_hint = self.cond_hint.to(device=x_noisy.device, dtype=dtype)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
@@ -102,6 +113,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
         self.x_noisy_shape = x_noisy.shape
+
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.to(dtype), context=context.to(dtype), **extra)
         return self.control_merge(control, control_prev, output_dtype=None)
 
@@ -114,8 +126,10 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
             flux_shape = self.x_noisy_shape
         return super().apply_advanced_strengths_and_masks(x, batched_number, flux_shape)
 
-    def copy(self):
-        c = ControlNetAdvanced(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
+    def copy(self, subtype=None):
+        if subtype is None:
+            subtype = ControlNetAdvanced
+        c = subtype(self.control_model, self.timestep_keyframes, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
         c.control_model = self.control_model
         c.control_model_wrapped = self.control_model_wrapped
         self.copy_to(c)
@@ -127,13 +141,27 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         return super().cleanup_advanced()
 
     @staticmethod
-    def from_vanilla(v: ControlNet, timestep_keyframe: TimestepKeyframeGroup=None) -> 'ControlNetAdvanced':
-        to_return = ControlNetAdvanced(control_model=v.control_model, timestep_keyframes=timestep_keyframe,
-                                  global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, load_device=v.load_device,
-                                  manual_cast_dtype=v.manual_cast_dtype)
+    def from_vanilla(v: ControlNet, timestep_keyframe: TimestepKeyframeGroup=None, subtype=None) -> 'ControlNetAdvanced':
+        if subtype is None:
+            subtype = ControlNetAdvanced
+        to_return = subtype(control_model=v.control_model, timestep_keyframes=timestep_keyframe,
+                            global_average_pooling=v.global_average_pooling, compression_ratio=v.compression_ratio, latent_format=v.latent_format, load_device=v.load_device,
+                            manual_cast_dtype=v.manual_cast_dtype, extra_conds=v.extra_conds, strength_type=v.strength_type, concat_mask=v.concat_mask, preprocess_image=v.preprocess_image)
         v.copy_to(to_return)
         to_return.control_model_wrapped = v.control_model_wrapped.clone() # needed to avoid breaking memory management system (parent tracking)
         return to_return
+
+
+class ControlNetSD35Advanced(ControlNetSD35, ControlNetAdvanced):
+    def __init__(self, *args, **kwargs):
+        ControlNetAdvanced.__init__(self, *args, **kwargs)
+
+    def copy(self):
+        return ControlNetAdvanced.copy(self, subtype=ControlNetSD35Advanced)
+    
+    @staticmethod
+    def from_vanilla(v: ControlNetSD35, timestep_keyframe=None):
+        return ControlNetAdvanced.from_vanilla(v, timestep_keyframe, subtype=ControlNetSD35Advanced)
 
 
 class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
@@ -529,6 +557,12 @@ def convert_to_advanced(control, timestep_keyframe: TimestepKeyframeGroup=None):
         if is_sd3_advanced_controlnet(control):
             control.require_vae = True
         return control
+    # if exactly ControlNetSD35 returned, transform into ControlNetSD35Advanced
+    elif type(control) == ControlNetSD35:
+        control = ControlNetSD35Advanced.from_vanilla(v=control, timestep_keyframe=timestep_keyframe)
+        if is_sd3_advanced_controlnet(control):
+            control.require_vae = True
+        return control
     # if exactly ControlLora returned, transform it into ControlLoraAdvanced
     elif type(control) == ControlLora:
         return ControlLoraAdvanced.from_vanilla(v=control, timestep_keyframe=timestep_keyframe)
@@ -654,7 +688,7 @@ def is_advanced_controlnet(input_object):
 
 
 def is_sd3_advanced_controlnet(input_object: ControlNetAdvanced):
-    return type(input_object) == ControlNetAdvanced and input_object.latent_format is not None
+    return type(input_object) in [ControlNetAdvanced, ControlNetSD35Advanced] and input_object.latent_format is not None
 
 
 def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None, sparse_settings=SparseSettings.default(), model=None) -> SparseCtrlAdvanced:
