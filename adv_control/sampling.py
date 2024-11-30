@@ -17,7 +17,18 @@ from .control_reference import (ReferenceAdvanced, ReferenceInjections,
                                 _forward_inject_BasicTransformerBlock,
                                 handle_context_ref_setup, handle_reference_injection,
                                 REF_CONTROL_LIST_ALL, CONTEXTREF_CLEAN_FUNC)
+from .dinklink import get_dinklink
 from .utils import torch_dfs, WrapperConsts
+
+
+def prepare_dinklink_acn_wrapper():
+    # expose acn_sampler_sample_wrapper
+    d = get_dinklink()
+    link_acn = d.setdefault(WrapperConsts.ACN, {})
+    link_acn[WrapperConsts.VERSION] = 10000
+    link_acn[WrapperConsts.ACN_CREATE_SAMPLER_SAMPLE_WRAPPER] = (comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
+                                                                 WrapperConsts.ACN_OUTER_SAMPLE_WRAPPER_KEY,
+                                                                 acn_outer_sample_wrapper)
 
 
 def support_sliding_context_windows(conds) -> tuple[bool, list[dict]]:

@@ -30,6 +30,7 @@ import comfy.ops
 import comfy.model_management
 import comfy.utils
 
+from .dinklink import get_AnimateDiffModel, get_AnimateDiffInfo
 from .logger import logger
 from .utils import (BIGMAX, AbstractPreprocWrapper, disable_weight_init_clean_groupnorm,
                     prepare_mask_batch, broadcast_image_to_extend, extend_to_batch_size)

@@ -12,27 +12,51 @@
 ####################################################################################################
 from __future__ import annotations
 import comfy.hooks
-from comfy.patcher_extension import WrappersMP
-
-from .sampling import acn_outer_sample_wrapper
-from .utils import WrapperConsts
 
 DINKLINK = "__DINKLINK"
 
+
 def init_dinklink():
-    if not hasattr(comfy.hooks, DINKLINK):
-        setattr(comfy.hooks, DINKLINK, {})
+    create_dinklink()
     prepare_dinklink()
 
+def create_dinklink():
+    if not hasattr(comfy.hooks, DINKLINK):
+        setattr(comfy.hooks, DINKLINK, {})
 
 def get_dinklink() -> dict[str, dict[str]]:
+    create_dinklink()
     return getattr(comfy.hooks, DINKLINK)
 
+
+class DinkLinkConst:
+    VERSION = "version"
+    # ADE
+    ADE = "ADE"
+    ADE_ANIMATEDIFFMODEL = "AnimateDiffModel"
+    ADE_ANIMATEDIFFINFO = "AnimateDiffInfo"
+
 def prepare_dinklink():
-    # expose acn_sampler_sample_wrapper
+    pass
+
+def get_AnimateDiffModel(throw_exception=True):
     d = get_dinklink()
-    link_acn = d.setdefault(WrapperConsts.ACN, {})
-    link_acn[WrapperConsts.VERSION] = 1
-    link_acn[WrapperConsts.ACN_CREATE_SAMPLER_SAMPLE_WRAPPER] = (WrappersMP.OUTER_SAMPLE,
-                                                             WrapperConsts.ACN_OUTER_SAMPLE_WRAPPER_KEY,
-                                                             acn_outer_sample_wrapper)
+    try:
+        link_ade = d[DinkLinkConst.ADE]
+        return link_ade[DinkLinkConst.ADE_ANIMATEDIFFMODEL]
+    except KeyError:
+        if throw_exception:
+            raise Exception("Could not get AnimateDiffModel class. AnimateDiff-Evolved nodes need to be installed to use SparseCtrl; " + \
+                            "they are either not installed or are of an insufficient version.")
+    return None
+
+def get_AnimateDiffInfo(throw_exception=True):
+    d = get_dinklink()
+    try:
+        link_ade = d[DinkLinkConst.ADE]
+        return link_ade[DinkLinkConst.ADE_ANIMATEDIFFINFO]
+    except KeyError:
+        if throw_exception:
+            raise Exception("Could not get AnimateDiffInfo class - AnimateDiff-Evolved nodes need to be installed to use SparseCtrl; " + \
+                            "they are either not installed or are of an insufficient version.")
+    return None
