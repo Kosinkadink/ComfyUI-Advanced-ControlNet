@@ -9,9 +9,6 @@ import math
 
 import comfy.ops
 import comfy.utils
-import comfy.sample
-import comfy.samplers
-import comfy.model_base
 
 from comfy.controlnet import ControlBase
 from comfy.model_patcher import ModelPatcher
@@ -25,6 +22,9 @@ BIGMAX = (2**53-1)
 ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
 CONTROL_INIT_BY_ACN = "_control_init_by_ACN"
 
+class Extras:
+    MIDDLE_MULT = "middle_mult"
+
 
 def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_load_torch_file: Callable):
     def load_torch_file_with_dict(*args, **kwargs):
@@ -33,107 +33,12 @@ def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_l
         return controlnet_data
     return load_torch_file_with_dict
 
-# wrapping len function so that it will save the thing len is trying to get the length of;
-# this will be assumed to be the cond_or_uncond variable;
-# automatically restores len to original function after running
-def wrapper_len_factory(orig_len: Callable) -> Callable:
-    def wrapper_len(*args, **kwargs):
-        cond_or_uncond = args[0]
-        real_length = orig_len(*args, **kwargs)
-        if real_length > 0 and type(cond_or_uncond) == list and isinstance(cond_or_uncond[0], int) and (cond_or_uncond[0] in [0, 1]):
-            try:
-                to_return = IntWithCondOrUncond(real_length)
-                setattr(to_return, "cond_or_uncond", cond_or_uncond)
-                return to_return
-            finally:
-                __builtins__["len"] = orig_len
-        else:
-            return real_length
-    return wrapper_len
 
-# wrapping cond_cat function so that it will wrap around len function to get cond_or_uncond variable value
-# from comfy.samplers.calc_conds_batch
-def wrapper_cond_cat_factory(orig_cond_cat: Callable):
-    def wrapper_cond_cat(*args, **kwargs):
-        __builtins__["len"] = wrapper_len_factory(__builtins__["len"])
-        return orig_cond_cat(*args, **kwargs)
-    return wrapper_cond_cat
-orig_cond_cat = comfy.samplers.cond_cat
-comfy.samplers.cond_cat = wrapper_cond_cat_factory(orig_cond_cat)
-
-
-# wrapping apply_model so that len function will be cleaned up fairly soon after being injected
-def apply_model_uncond_cleanup_factory(orig_apply_model, orig_len):
-    def apply_model_uncond_cleanup_wrapper(self, *args, **kwargs):
-        __builtins__["len"] = orig_len
-        return orig_apply_model(self, *args, **kwargs)
-    return apply_model_uncond_cleanup_wrapper
-global_orig_len = __builtins__["len"]
-orig_apply_model = comfy.model_base.BaseModel.apply_model
-comfy.model_base.BaseModel.apply_model = apply_model_uncond_cleanup_factory(orig_apply_model, global_orig_len)
-
-
-def uncond_multiplier_check_cn_sample_factory(orig_comfy_sample: Callable, is_custom=False) -> Callable:
-    def contains_uncond_multiplier(control: Union[ControlBase, 'AdvancedControlBase']):
-        if control is None:
-            return False
-        if not isinstance(control, AdvancedControlBase):
-            return contains_uncond_multiplier(control.previous_controlnet)
-        # check if weights_override has an uncond_multiplier
-        if control.weights_override is not None and control.weights_override.has_uncond_multiplier:
-            return True
-        # check if any timestep_keyframes have an uncond_multiplier on their weights
-        if control.timestep_keyframes is not None:
-            for tk in control.timestep_keyframes.keyframes:
-                if tk.has_control_weights() and tk.control_weights.has_uncond_multiplier:
-                    return True
-        return contains_uncond_multiplier(control.previous_controlnet)
-
-    # check if positive or negative conds contain Adv. Cns that use multiply_negative on weights
-    def uncond_multiplier_check_cn_sample(model: ModelPatcher, *args, **kwargs):
-        positive = args[-3]
-        negative = args[-2]
-        has_uncond_multiplier = False
-        if positive is not None:
-            for cond in positive:
-                if "control" in cond[1]:
-                    has_uncond_multiplier = contains_uncond_multiplier(cond[1]["control"])
-                    if has_uncond_multiplier:
-                        break
-        if negative is not None and not has_uncond_multiplier:
-            for cond in negative:
-                if "control" in cond[1]:
-                    has_uncond_multiplier = contains_uncond_multiplier(cond[1]["control"])
-                    if has_uncond_multiplier:
-                        break
-        try:
-            # if uncond_multiplier found, continue to use wrapped version of function
-            if has_uncond_multiplier:
-                return orig_comfy_sample(model, *args, **kwargs)
-            # otherwise, use original version of function to prevent even the smallest of slowdowns (0.XX%)
-            try:
-                wrapped_cond_cat = comfy.samplers.cond_cat
-                comfy.samplers.cond_cat = orig_cond_cat
-                return orig_comfy_sample(model, *args, **kwargs)
-            finally:
-                comfy.samplers.cond_cat = wrapped_cond_cat
-        finally:
-            # make sure len function is unwrapped by the time sampling is done, just in case
-            __builtins__["len"] = global_orig_len
-    return uncond_multiplier_check_cn_sample
-# inject sample functions
-comfy.sample.sample = uncond_multiplier_check_cn_sample_factory(comfy.sample.sample)
-comfy.sample.sample_custom = uncond_multiplier_check_cn_sample_factory(comfy.sample.sample_custom, is_custom=True)
-
-
-class IntWithCondOrUncond(int):
-    def __new__(cls, *args, **kwargs):
-        return super(IntWithCondOrUncond, cls).__new__(cls, *args, **kwargs)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-        self.cond_or_uncond = None
-
+class WrapperConsts:
+    ACN = "ACN"
+    VERSION = "version"
+    ACN_OUTER_SAMPLE_WRAPPER_KEY = "ACN_outer_sample_wrapper"
+    ACN_CREATE_SAMPLER_SAMPLE_WRAPPER = "create_outer_sample_wrapper"
 
 
 def get_properly_arranged_t2i_weights(initial_weights: list[float]):
@@ -155,13 +60,15 @@ class ControlWeightType:
     CONTROLLLLITE = "controllllite"
     SVD_CONTROLNET = "svd_controlnet"
     SPARSECTRL = "sparsectrl"
+    CTRLORA = "ctrlora"
 
 
 class ControlWeights:
     def __init__(self, weight_type: str, base_multiplier: float=1.0,
                  weights_input: list[float]=None, weights_middle: list[float]=None, weights_output: list[float]=None,
                  weight_func: Callable=None, weight_mask: Tensor=None,
-                 uncond_multiplier=1.0, uncond_mask: Tensor=None, extras: dict[str]={},):
+                 uncond_multiplier=1.0, uncond_mask: Tensor=None,
+                 extras: dict[str]={}, disable_applied_to=False):
         self.weight_type = weight_type
         self.base_multiplier = base_multiplier
         self.weights_input = weights_input
@@ -173,16 +80,19 @@ class ControlWeights:
         self.has_uncond_multiplier = not math.isclose(self.uncond_multiplier, 1.0)
         self.uncond_mask = uncond_mask if uncond_mask is not None else 1.0
         self.has_uncond_mask = uncond_mask is not None
-        self.extras = extras
+        self.extras = extras.copy()
+        self.disable_applied_to = disable_applied_to
 
     def get(self, idx: int, control: dict[str, list[Tensor]], key: str, default=1.0) -> Union[float, Tensor]:
         # if weight_func present, use it
         if self.weight_func is not None:
             return self.weight_func(idx=idx, control=control, key=key)
+        effective_mult = 1.0
         # if weights is not none, return index
         relevant_weights = None
         if key == "middle":
             relevant_weights = self.weights_middle
+            effective_mult *= self.extras.get(Extras.MIDDLE_MULT, 1.0)
         elif key == "input":
             relevant_weights = self.weights_input
             if relevant_weights is not None:
@@ -190,17 +100,18 @@ class ControlWeights:
         else:
             relevant_weights = self.weights_output
         if relevant_weights is None:
-            return default
+            return default * effective_mult
         elif idx >= len(relevant_weights):
-            return default
-        return relevant_weights[idx]
+            return default * effective_mult
+        return relevant_weights[idx] * effective_mult
 
     def copy_with_new_weights(self, new_weights_input: list[float]=None, new_weights_middle: list[float]=None, new_weights_output: list[float]=None,
                               new_weight_func: Callable=None):
         return ControlWeights(weight_type=self.weight_type, base_multiplier=self.base_multiplier,
                               weights_input=new_weights_input, weights_middle=new_weights_middle, weights_output=new_weights_output,
                               weight_func=new_weight_func, weight_mask=self.weight_mask,
-                              uncond_multiplier=self.uncond_multiplier, extras=self.extras)
+                              uncond_multiplier=self.uncond_multiplier,
+                              extras=self.extras, disable_applied_to=self.disable_applied_to)
 
     @classmethod
     def default(cls, extras: dict[str]={}):
@@ -208,27 +119,27 @@ class ControlWeights:
 
     @classmethod
     def universal(cls, base_multiplier: float, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, extras=extras)
+        return cls(ControlWeightType.UNIVERSAL, base_multiplier=base_multiplier, uncond_multiplier=uncond_multiplier, disable_applied_to=True, extras=extras)
     
     @classmethod
     def universal_mask(cls, weight_mask: Tensor, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, extras=extras)
+        return cls(ControlWeightType.UNIVERSAL, weight_mask=weight_mask, uncond_multiplier=uncond_multiplier, disable_applied_to=True, extras=extras)
 
     @classmethod
-    def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def t2iadapter(cls, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.T2IADAPTER, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
 
     @classmethod
-    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controlnet(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.CONTROLNET, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
     
     @classmethod
-    def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllora(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.CONTROLLORA, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
     
     @classmethod
-    def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}):
-        return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras)
+    def controllllite(cls, weights_output: list[float]=None, weights_middle: list[float]=None, weights_input: list[float]=None, uncond_multiplier: float=1.0, extras: dict[str]={}, disable_applied_to=False):
+        return cls(ControlWeightType.CONTROLLLLITE, weights_output=weights_output, weights_middle=weights_middle, weights_input=weights_input, uncond_multiplier=uncond_multiplier, extras=extras, disable_applied_to=disable_applied_to)
 
 
 class StrengthInterpolation:
@@ -341,9 +252,10 @@ class TimestepKeyframe:
 
 # always maintain sorted state (by start_percent of TimestepKeyFrame)
 class TimestepKeyframeGroup:
-    def __init__(self) -> None:
+    def __init__(self, add_default=True) -> None:
         self.keyframes: list[TimestepKeyframe] = []
-        self.keyframes.append(TimestepKeyframe.default())
+        if add_default:
+            self.keyframes.append(TimestepKeyframe.default())
 
     def add(self, keyframe: TimestepKeyframe) -> None:
         # add to end of list, then sort
@@ -369,7 +281,7 @@ class TimestepKeyframeGroup:
         return len(self.keyframes) == 0
     
     def clone(self) -> 'TimestepKeyframeGroup':
-        cloned = TimestepKeyframeGroup()
+        cloned = TimestepKeyframeGroup(add_default=False)
         # already sorted, so don't use add function to make cloning quicker
         for tk in self.keyframes:
             cloned.keyframes.append(tk)
@@ -562,7 +474,7 @@ class WeightTypeException(TypeError):
 
 
 class AdvancedControlBase:
-    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_model=False, require_vae=False, allow_condhint_latents=False):
+    def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_vae=False, allow_condhint_latents=False):
         self.base = base
         self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
         self.add_compatible_weight(weights_default.weight_type)
@@ -579,8 +491,9 @@ class AdvancedControlBase:
         # timesteps
         self.t: float = None
         self.prev_t: float = None
-        self.batched_number: Union[int, IntWithCondOrUncond] = None
+        self.batched_number: int = None
         self.batch_size: int = 0
+        self.cond_or_uncond: list[int] = None
         # weights + override
         self.weights: ControlWeights = None
         self.weights_default: ControlWeights = weights_default
@@ -599,15 +512,15 @@ class AdvancedControlBase:
         self.set_cond_hint = self.set_cond_hint_inject
         # vae to store
         self.adv_vae = None
+        self.mult_by_ratio_when_vae = True
+        # compression ratio stuff
+        self.real_compression_ratio = None
         # require model/vae to be passed into Apply Advanced ControlNet 🛂🅐🅒🅝 node
-        self.require_model = require_model
         self.require_vae = require_vae
         self.allow_condhint_latents = allow_condhint_latents
+        self.postpone_condhint_latents_check = False
         # disarm - when set to False, used to force usage of Apply Advanced ControlNet 🛂🅐🅒🅝 node (which will set it to True)
-        self.disarmed = not require_model
-    
-    def patch_model(self, model: ModelPatcher):
-        pass
+        self.disarmed = True
 
     def add_compatible_weight(self, control_weight_type: str):
         self.compatible_weights.append(control_weight_type)
@@ -715,11 +628,13 @@ class AdvancedControlBase:
             for arg in args:
                 if isinstance(arg, VAE):
                     self.adv_vae = arg
+                    self.vae = arg
                     break
             # if not in args, check kwargs now
             if self.adv_vae is None:
                 if 'vae' in kwargs:
                     self.adv_vae = kwargs['vae']
+                    self.vae = kwargs['vae']
         return to_return
 
     def pre_run_inject(self, model, percent_to_timestep_function):
@@ -730,6 +645,9 @@ class AdvancedControlBase:
         # for each timestep keyframe, calculate the start_t
         for tk in self.timestep_keyframes.keyframes:
             tk.start_t = percent_to_timestep_function(tk.start_percent)
+        # set real_compression_ratio to compression_ratio
+        if hasattr(self, "compression_ratio"):
+            self.real_compression_ratio = self.compression_ratio
         # clear variables
         self.cleanup_advanced()
 
@@ -750,24 +668,25 @@ class AdvancedControlBase:
                 return False
         return True
 
-    def get_control_inject(self, x_noisy, t, cond, batched_number):
+    def get_control_inject(self, x_noisy, t, cond, batched_number, transformer_options: dict):
         self.batched_number = batched_number
         self.batch_size = len(t)
+        self.cond_or_uncond = transformer_options.get("cond_or_uncond", None)
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, batched_number=batched_number)
         # if should not perform any actions for the controlnet, exit without doing any work
         if self.strength == 0.0 or self._current_timestep_keyframe.strength == 0.0:
-            return self.default_control_actions(x_noisy, t, cond, batched_number)
+            return self.default_control_actions(x_noisy, t, cond, batched_number, transformer_options)
         # otherwise, perform normal function
-        return self.get_control_advanced(x_noisy, t, cond, batched_number)
+        return self.get_control_advanced(x_noisy, t, cond, batched_number, transformer_options)
 
-    def get_control_advanced(self, x_noisy, t, cond, batched_number):
-        return self.default_control_actions(x_noisy, t, cond, batched_number)
+    def get_control_advanced(self, x_noisy, t, cond, batched_number, transformer_options):
+        return self.default_control_actions(x_noisy, t, cond, batched_number, transformer_options)
 
-    def default_control_actions(self, x_noisy, t, cond, batched_number):
+    def default_control_actions(self, x_noisy, t, cond, batched_number, transformer_options):
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
         return control_prev
 
     def calc_weight(self, idx: int, x: Tensor, control: dict[str, list[Tensor]], key: str) -> Union[float, Tensor]:
@@ -839,9 +758,8 @@ class AdvancedControlBase:
     def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, flux_shape: tuple=None):
         # handle weight's uncond_multiplier, if applicable
         if self.weights.has_uncond_multiplier:
-            cond_or_uncond = self.batched_number.cond_or_uncond
             actual_length = x.size(0) // batched_number
-            for idx, cond_type in enumerate(cond_or_uncond):
+            for idx, cond_type in enumerate(self.cond_or_uncond):
                 # if uncond, set to weight's uncond_multiplier
                 if cond_type == 1:
                     x[actual_length*idx:actual_length*(idx+1)] *= self.weights.uncond_multiplier
@@ -872,6 +790,10 @@ class AdvancedControlBase:
                 if x is not None:
                     if self.global_average_pooling:
                         x = torch.mean(x, dim=(2, 3), keepdim=True).repeat(1, 1, x.shape[2], x.shape[3])
+
+                    # if should disable applied_to optimization, clone the weight if in applied_to
+                    if self.weights.disable_applied_to and x in applied_to:
+                        x = x.clone()
 
                     if x not in applied_to: #memory saving strategy, allow shared tensors and only apply strength to shared tensors once
                         applied_to.add(x)
@@ -953,6 +875,9 @@ class AdvancedControlBase:
         self.batch_size = 0
         self.weights = None
         self.latent_keyframes = None
+        # set effective_compression_ratio to compression_ratio
+        if hasattr(self, "compression_ratio"):
+            self.real_compression_ratio = self.compression_ratio
         # timestep stuff
         self._current_timestep_keyframe = None
         self._current_timestep_index = -1
@@ -976,6 +901,8 @@ class AdvancedControlBase:
         copied.weights_override = self.weights_override
         copied.latent_keyframe_override = self.latent_keyframe_override
         copied.adv_vae = self.adv_vae
+        copied.mult_by_ratio_when_vae = self.mult_by_ratio_when_vae
         copied.require_vae = self.require_vae
         copied.allow_condhint_latents = self.allow_condhint_latents
+        copied.postpone_condhint_latents_check = self.postpone_condhint_latents_check
         copied.disarmed = self.disarmed

@@ -15,12 +15,12 @@ from comfy.controlnet import ControlBase
 
 from .logger import logger
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, ControlWeights, broadcast_image_to_extend, extend_to_batch_size,
-                    deepcopy_with_sharing, prepare_mask_batch)
+                    prepare_mask_batch)
 
 
 # based on set_model_patch code in comfy/model_patcher.py
-def set_model_patch(model_options, patch, name):
-    to = model_options["transformer_options"]
+def set_model_patch(transformer_options, patch, name):
+    to = transformer_options
     # check if patch was already added
     if "patches" in to:
         current_patches = to["patches"].get(name, [])
@@ -30,11 +30,11 @@ def set_model_patch(model_options, patch, name):
         to["patches"] = {}
     to["patches"][name] = to["patches"].get(name, []) + [patch]
 
-def set_model_attn1_patch(model_options, patch):
-    set_model_patch(model_options, patch, "attn1_patch")
+def set_model_attn1_patch(transformer_options, patch):
+    set_model_patch(transformer_options, patch, "attn1_patch")
 
-def set_model_attn2_patch(model_options, patch):
-    set_model_patch(model_options, patch, "attn2_patch")
+def set_model_attn2_patch(transformer_options, patch):
+    set_model_patch(transformer_options, patch, "attn2_patch")
 
 
 def extra_options_to_module_prefix(extra_options):
@@ -115,26 +115,8 @@ class LLLitePatch:
         return LLLitePatch(self.modules, self.patch_type, control)
 
     def cleanup(self):
-        #total_cleaned = 0
         for module in self.modules.values():
             module.cleanup()
-        #    total_cleaned += 1
-        #logger.info(f"cleaned modules: {total_cleaned}, {id(self)}")
-        #logger.error(f"cleanup LLLitePatch: {id(self)}")
-
-    # make sure deepcopy does not copy control, and deepcopied LLLitePatch should be assigned to control
-    # def __deepcopy__(self, memo):
-    #     self.cleanup()
-    #     to_return: LLLitePatch = deepcopy_with_sharing(self, shared_attribute_names = ['control'], memo=memo)
-    #     #logger.warn(f"patch {id(self)} turned into {id(to_return)}")
-    #     try:
-    #         if self.patch_type == self.ATTN1:
-    #             to_return.control.patch_attn1 = to_return
-    #         elif self.patch_type == self.ATTN2:
-    #             to_return.control.patch_attn2 = to_return
-    #     except Exception:
-    #         pass
-    #     return to_return
 
 
 # TODO: use comfy.ops to support fp8 properly
@@ -298,14 +280,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.latent_dims_div2 = None
         self.latent_dims_div4 = None
 
-    def live_model_patches(self, model_options):
-        set_model_attn1_patch(model_options, self.patch_attn1.set_control(self))
-        set_model_attn2_patch(model_options, self.patch_attn2.set_control(self))
-
-    # def patch_model(self, model: ModelPatcher):
-    #     model.set_model_attn1_patch(self.patch_attn1)
-    #     model.set_model_attn2_patch(self.patch_attn2)
-
     def set_cond_hint_inject(self, *args, **kwargs):
         to_return = super().set_cond_hint_inject(*args, **kwargs)
         # cond hint for LLLite needs to be scaled between (-1, 1) instead of (0, 1)
@@ -319,11 +293,11 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.patch_attn2.set_control(self)
         #logger.warn(f"in pre_run_advanced: {id(self)}")
     
-    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int):
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options: dict):
         # normal ControlNet stuff
         control_prev = None
         if self.previous_controlnet is not None:
-            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number)
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
 
         if self.timestep_range is not None:
             if t[0] > self.timestep_range[0] or t[0] < self.timestep_range[1]:
@@ -372,7 +346,9 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
             self.latent_dims_div4 = (new_h, new_w)
         # prepare mask
         self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
-        # done preparing; model patches will take care of everything now.
+        # done preparing; model patches will take care of everything now
+        set_model_attn1_patch(transformer_options, self.patch_attn1.set_control(self))
+        set_model_attn2_patch(transformer_options, self.patch_attn2.set_control(self))
         # return normal controlnet stuff
         return control_prev
     
@@ -393,17 +369,6 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
-    
-    # deepcopy needs to properly keep track of objects to work between model.clone calls!
-    # def __deepcopy__(self, *args, **kwargs):
-    #     self.cleanup_advanced()
-    #     return self
-
-    # def get_models(self):
-    #     # get_models is called once at the start of every KSampler run - use to reset already_patched status
-    #     out = super().get_models()
-    #     logger.error(f"in get_models! {id(self)}")
-    #     return out
 
 
 def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None):

@@ -62,8 +62,10 @@ class PlusPlusInputNode:
             },
             "optional": {
                 "prev_plus_input": ("PLUS_INPUT",),
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
                 #"strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": BIGMAX, "step": 0.01}),
+            },
+            "hidden": {
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
     
