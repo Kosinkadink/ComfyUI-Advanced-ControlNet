@@ -15,7 +15,7 @@ from .control_sparsectrl import SparseControlNet, SparseSettings, SparseConst, I
 from .control_lllite import LLLiteModule, LLLitePatch, load_controllllite
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException, Extras,
-                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
+                    manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, WrapperConsts, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
                     broadcast_image_to_extend, extend_to_batch_size, ORIG_PREVIOUS_CONTROLNET, CONTROL_INIT_BY_ACN)
 from .logger import logger
 
@@ -347,18 +347,27 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                  timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, load_device=None, manual_cast_dtype=None):
         super().__init__(control_model=None, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
         self.control_model = control_model
-        self.motion_model = motion_model
-        self.control_model_wrapped: ModelPatcher = create_sparse_modelpatcher(self.control_model, self.motion_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
+        if control_model is not None:
+            self.control_model_wrapped: ModelPatcher = create_sparse_modelpatcher(self.control_model, motion_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
+            self.prepare_conditioning_info()
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
         self.postpone_condhint_latents_check = True
+        self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
+        self.model_latent_format = None  # latent format for active SD model, NOT controlnet
+        self.preprocessed = False
+    
+    def prepare_conditioning_info(self):
         if self.control_model.use_simplified_conditioning_embedding:
             # TODO: allow vae_optional to be used instead of preprocessor
             #self.require_vae = True
             self.allow_condhint_latents = True
-        self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
-        self.model_latent_format = None  # latent format for active SD model, NOT controlnet
-        self.preprocessed = False
-        
+
+    @property
+    def motion_model(self) -> InterfaceAnimateDiffModel:
+        motion_models = self.control_model_wrapped.get_additional_models_with_key(WrapperConsts.ACN)
+        if len(motion_models) == 0:
+            return None
+        return motion_models[0].model
 
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options):
         # normal ControlNet stuff
@@ -485,7 +494,10 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             self.motion_model.cleanup()
 
     def copy(self):
-        c = SparseCtrlAdvanced(self.control_model, self.motion_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.load_device, self.manual_cast_dtype)
+        c = SparseCtrlAdvanced(None, None, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.load_device, self.manual_cast_dtype)
+        c.control_model = self.control_model
+        c.control_model_wrapped = self.control_model_wrapped
+        self.prepare_conditioning_info()
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
