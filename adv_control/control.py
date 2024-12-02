@@ -11,7 +11,7 @@ import comfy.controlnet as comfy_cn
 from comfy.controlnet import ControlBase, ControlNet, ControlNetSD35, ControlLora, T2IAdapter, StrengthType
 from comfy.model_patcher import ModelPatcher
 
-from .control_sparsectrl import SparseControlNet, SparseCtrlMotionWrapper, SparseSettings, SparseConst, create_sparse_modelpatcher
+from .control_sparsectrl import SparseControlNet, SparseSettings, SparseConst, InterfaceAnimateDiffModel, create_sparse_modelpatcher, load_sparsectrl_motionmodel
 from .control_lllite import LLLiteModule, LLLitePatch, load_controllllite
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException, Extras,
@@ -343,11 +343,13 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
 
 
 class SparseCtrlAdvanced(ControlNetAdvanced):
-    def __init__(self, control_model, timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, load_device=None, manual_cast_dtype=None):
-        super().__init__(control_model=control_model, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
-        self.control_model_wrapped = create_sparse_modelpatcher(self.control_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
+    def __init__(self, control_model: SparseControlNet, motion_model: InterfaceAnimateDiffModel,
+                 timestep_keyframes: TimestepKeyframeGroup, sparse_settings: SparseSettings=None, global_average_pooling=False, load_device=None, manual_cast_dtype=None):
+        super().__init__(control_model=None, timestep_keyframes=timestep_keyframes, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+        self.control_model = control_model
+        self.motion_model = motion_model
+        self.control_model_wrapped: ModelPatcher = create_sparse_modelpatcher(self.control_model, self.motion_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
         self.add_compatible_weight(ControlWeightType.SPARSECTRL)
-        self.control_model: SparseControlNet = self.control_model  # does nothing except help with IDE hints
         self.postpone_condhint_latents_check = True
         if self.control_model.use_simplified_conditioning_embedding:
             # TODO: allow vae_optional to be used instead of preprocessor
@@ -356,7 +358,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.sparse_settings = sparse_settings if sparse_settings is not None else SparseSettings.default()
         self.model_latent_format = None  # latent format for active SD model, NOT controlnet
         self.preprocessed = False
-    
+        
+
     def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options):
         # normal ControlNet stuff
         control_prev = None
@@ -377,7 +380,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         # set actual input length on motion model
         actual_length = x_noisy.size(0)//batched_number
         full_length = actual_length if self.sub_idxs is None else self.full_latent_length
-        self.control_model.set_actual_length(actual_length=actual_length, full_length=full_length)
+        if self.motion_model is not None:
+            self.motion_model.set_video_length(video_length=actual_length, full_length=full_length)
         # prepare cond_hint, if needed
         dim_mult = 1 if self.control_model.use_simplified_conditioning_embedding else 8
         if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2]*dim_mult != self.cond_hint.shape[2] or x_noisy.shape[3]*dim_mult != self.cond_hint.shape[3]:
@@ -465,10 +469,10 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
                 raise ValueError("Any model besides RGB SparseCtrl should NOT have its images go through the RGB SparseCtrl preprocessor.")
             self.cond_hint_original = self.cond_hint_original.condhint
         self.model_latent_format = model.latent_format  # LatentFormat object, used to process_in latent cond hint
-        if self.control_model.motion_wrapper is not None:
-            self.control_model.motion_wrapper.reset()
-            self.control_model.motion_wrapper.set_strength(self.sparse_settings.motion_strength)
-            self.control_model.motion_wrapper.set_scale_multiplier(self.sparse_settings.motion_scale)
+        if self.motion_model is not None:
+            self.motion_model.cleanup()
+            self.motion_model.set_effect(self.sparse_settings.motion_strength)
+            self.motion_model.set_scale(self.sparse_settings.motion_scale)
 
     def cleanup_advanced(self):
         super().cleanup_advanced()
@@ -479,10 +483,15 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         self.local_sparse_idxs_inverse = None
 
     def copy(self):
-        c = SparseCtrlAdvanced(self.control_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.load_device, self.manual_cast_dtype)
+        c = SparseCtrlAdvanced(self.control_model, self.motion_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.load_device, self.manual_cast_dtype)
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
+
+    def get_models(self):
+        to_return = super().get_models()
+        to_return.extend(self.control_model_wrapped.get_additional_models())
+        return to_return
 
 
 def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, model=None):
@@ -828,16 +837,12 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
         global_average_pooling = True
 
     # actually load motion portion of model now
-    motion_wrapper: SparseCtrlMotionWrapper = SparseCtrlMotionWrapper(motion_data, ops=controlnet_config.get("operations", None)).to(comfy.model_management.unet_dtype())
-    missing, unexpected = motion_wrapper.load_state_dict(motion_data)
-    if len(missing) > 0 or len(unexpected) > 0:
-        logger.info(f"SparseCtrlMotionWrapper: {missing}, {unexpected}")
+    motion_model = load_sparsectrl_motionmodel(ckpt_path=ckpt_path, motion_data=motion_data, ops=controlnet_config.get("operations", None)).to(comfy.model_management.unet_dtype())
+    # both motion portion and controlnet portions are loaded; ignore motion_model if shouldn't use motion portion
+    if not sparse_settings.use_motion:
+        motion_model = None
 
-    # both motion portion and controlnet portions are loaded; bring them together if using motion model
-    if sparse_settings.use_motion:
-        motion_wrapper.inject(control_model)
-
-    control = SparseCtrlAdvanced(control_model, timestep_keyframes=timestep_keyframe, sparse_settings=sparse_settings, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    control = SparseCtrlAdvanced(control_model, motion_model, timestep_keyframes=timestep_keyframe, sparse_settings=sparse_settings, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
     return control
 
 
