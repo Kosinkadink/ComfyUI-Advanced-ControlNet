@@ -481,6 +481,8 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
             self.model_latent_format = None
         self.local_sparse_idxs = None
         self.local_sparse_idxs_inverse = None
+        if self.motion_model is not None:
+            self.motion_model.cleanup()
 
     def copy(self):
         c = SparseCtrlAdvanced(self.control_model, self.motion_model, self.timestep_keyframes, self.sparse_settings, self.global_average_pooling, self.load_device, self.manual_cast_dtype)
