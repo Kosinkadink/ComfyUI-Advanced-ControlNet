@@ -26,6 +26,7 @@ class PlusPlusLoaderAdvanced:
         controlnet_path = folder_paths.get_full_path("controlnet", name)
         controlnet = load_controlnetplusplus(controlnet_path)
         controlnet.verify_control_type(name, plus_input)
+        controlnet.allow_condhint_latents = True
         return (controlnet, PlusPlusImageWrapper(plus_input),)
 
 
