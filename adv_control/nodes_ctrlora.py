@@ -16,7 +16,7 @@ class CtrLoRALoader:
     RETURN_TYPES = ("CONTROL_NET",)
     FUNCTION = "load_controlnet_plusplus"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/ControlNet++"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/CtrLoRA"
 
     def load_controlnet_plusplus(self, base: str, lora: str):
         base_path = folder_paths.get_full_path("controlnet", base)
