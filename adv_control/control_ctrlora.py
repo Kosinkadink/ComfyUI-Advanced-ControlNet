@@ -1,3 +1,5 @@
+# Core code adapted from CtrLoRA github repo:
+# https://github.com/xyfJASON/ctrlora
 import torch
 from torch import Tensor
 
