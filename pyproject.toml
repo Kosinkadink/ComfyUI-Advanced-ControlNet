@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-advanced-controlnet"
 description = "Nodes for scheduling ControlNet strength across timesteps and batched latents, as well as applying custom weights and attention masks."
-version = "1.4.1"
+version = "1.4.2"
 license = { file = "LICENSE" }
 dependencies = []
 
