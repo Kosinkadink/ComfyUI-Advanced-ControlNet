@@ -244,6 +244,11 @@ class TimestepKeyframe:
     def has_mask_hint(self):
         return self.mask_hint_orig is not None
     
+    def get_effective_guarantee_steps(self, max_sigma: torch.Tensor):
+        '''If keyframe starts before current sampling range (max_sigma), treat as 0.'''
+        if self.start_t > max_sigma:
+            return 0
+        return self.guarantee_steps
     
     @staticmethod
     def default() -> 'TimestepKeyframe':
@@ -549,7 +554,7 @@ class AdvancedControlBase:
         self.weights = None
         self.latent_keyframes = None
 
-    def prepare_current_timestep(self, t: Tensor, batched_number: int=1):
+    def prepare_current_timestep(self, t: Tensor, transformer_options: dict[str, torch.Tensor]):
         self.t = float(t[0])
         # check if t has changed (otherwise do nothing, as step already accounted for)
         if self.t == self.prev_t:
@@ -557,8 +562,9 @@ class AdvancedControlBase:
         # get current step percent
         curr_t: float = self.t
         prev_index = self._current_timestep_index
+        max_sigma = torch.max(transformer_options.get("sigmas", BIGMAX))
         # if met guaranteed steps (or no current keyframe), look for next keyframe in case need to switch
-        if self._current_timestep_keyframe is None or self._current_used_steps >= self._current_timestep_keyframe.guarantee_steps:
+        if self._current_timestep_keyframe is None or self._current_used_steps >= self._current_timestep_keyframe.get_effective_guarantee_steps(max_sigma):
             # if has next index, loop through and see if need to switch
             if self.timestep_keyframes.has_index(self._current_timestep_index+1):
                 for i in range(self._current_timestep_index+1, len(self.timestep_keyframes)):
@@ -584,7 +590,7 @@ class AdvancedControlBase:
                             del self.tk_mask_cond_hint_original
                             self.tk_mask_cond_hint_original = None
                         # if guarantee_steps greater than zero, stop searching for other keyframes
-                        if self._current_timestep_keyframe.guarantee_steps > 0:
+                        if self._current_timestep_keyframe.get_effective_guarantee_steps(max_sigma) > 0:
                             break
                     # if eval_tk is outside of percent range, stop looking further
                     else:
@@ -673,7 +679,7 @@ class AdvancedControlBase:
         self.batch_size = len(t)
         self.cond_or_uncond = transformer_options.get("cond_or_uncond", None)
         # prepare timestep and everything related
-        self.prepare_current_timestep(t=t, batched_number=batched_number)
+        self.prepare_current_timestep(t=t, transformer_options=transformer_options)
         # if should not perform any actions for the controlnet, exit without doing any work
         if self.strength == 0.0 or self._current_timestep_keyframe.strength == 0.0:
             return self.default_control_actions(x_noisy, t, cond, batched_number, transformer_options)
