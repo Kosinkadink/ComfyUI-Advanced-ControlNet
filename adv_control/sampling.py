@@ -20,12 +20,13 @@ from .control_reference import (ReferenceAdvanced, ReferenceInjections,
 from .dinklink import get_dinklink
 from .utils import torch_dfs, WrapperConsts
 
+CURRENT_WRAPPER_VERSION = 10001
 
 def prepare_dinklink_acn_wrapper():
     # expose acn_sampler_sample_wrapper
     d = get_dinklink()
     link_acn = d.setdefault(WrapperConsts.ACN, {})
-    link_acn[WrapperConsts.VERSION] = 10000
+    link_acn[WrapperConsts.VERSION] = CURRENT_WRAPPER_VERSION
     link_acn[WrapperConsts.ACN_CREATE_SAMPLER_SAMPLE_WRAPPER] = (comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
                                                                  WrapperConsts.ACN_OUTER_SAMPLE_WRAPPER_KEY,
                                                                  acn_outer_sample_wrapper)
