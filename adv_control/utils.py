@@ -18,6 +18,7 @@ from .logger import logger
 
 BIGMIN = -(2**53-1)
 BIGMAX = (2**53-1)
+BIGMAX_TENSOR = torch.tensor(BIGMAX)
 
 ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
 CONTROL_INIT_BY_ACN = "_control_init_by_ACN"
@@ -562,7 +563,7 @@ class AdvancedControlBase:
         # get current step percent
         curr_t: float = self.t
         prev_index = self._current_timestep_index
-        max_sigma = torch.max(transformer_options.get("sigmas", BIGMAX))
+        max_sigma = torch.max(transformer_options.get("sample_sigmas", BIGMAX_TENSOR))
         # if met guaranteed steps (or no current keyframe), look for next keyframe in case need to switch
         if self._current_timestep_keyframe is None or self._current_used_steps >= self._current_timestep_keyframe.get_effective_guarantee_steps(max_sigma):
             # if has next index, loop through and see if need to switch
