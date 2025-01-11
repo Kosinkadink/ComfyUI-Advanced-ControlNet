@@ -50,6 +50,7 @@ class ControlNetCtrLoRA(ControlNetCLDM):
 class CtrLoRAAdvanced(ControlNetAdvanced):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.preprocess_image = lambda a: (a + 1) / 2.0
         self.require_vae = True
         self.mult_by_ratio_when_vae = False
 
@@ -212,7 +213,7 @@ def load_lora_data(control: CtrLoRAAdvanced, lora_path: str, loaded_data: dict[s
     # lora will do mm of up and down tensors
     for down_key in data_lora:
         # only process lora down keys; we will process both up+down at the same time
-        if ".up." in key:
+        if ".up." in down_key:
             continue
         # get up version of down key
         up_key = down_key.replace(".down.", ".up.")
