@@ -35,6 +35,8 @@ def load_torch_file_with_dict_factory(controlnet_data: dict[str, Tensor], orig_l
     return load_torch_file_with_dict
 
 
+CURRENT_WRAPPER_VERSION = 10002
+
 class WrapperConsts:
     ACN = "ACN"
     VERSION = "version"
@@ -480,6 +482,8 @@ class WeightTypeException(TypeError):
 
 
 class AdvancedControlBase:
+    ACN_VERSION = CURRENT_WRAPPER_VERSION
+    
     def __init__(self, base: ControlBase, timestep_keyframes: TimestepKeyframeGroup, weights_default: ControlWeights, require_vae=False, allow_condhint_latents=False):
         self.base = base
         self.compatible_weights = [ControlWeightType.UNIVERSAL, ControlWeightType.DEFAULT]
@@ -679,6 +683,11 @@ class AdvancedControlBase:
         self.batched_number = batched_number
         self.batch_size = len(t)
         self.cond_or_uncond = transformer_options.get("cond_or_uncond", None)
+        # fill out ad_param-related fields, if present
+        if "ad_params" in transformer_options:
+            self.sub_idxs = transformer_options["ad_params"]["sub_idxs"]
+            self.full_latent_length = transformer_options["ad_params"]["full_length"]
+            self.context_length = transformer_options["ad_params"]["context_length"]
         # prepare timestep and everything related
         self.prepare_current_timestep(t=t, transformer_options=transformer_options)
         # if should not perform any actions for the controlnet, exit without doing any work

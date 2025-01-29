@@ -18,9 +18,7 @@ from .control_reference import (ReferenceAdvanced, ReferenceInjections,
                                 handle_context_ref_setup, handle_reference_injection,
                                 REF_CONTROL_LIST_ALL, CONTEXTREF_CLEAN_FUNC)
 from .dinklink import get_dinklink
-from .utils import torch_dfs, WrapperConsts
-
-CURRENT_WRAPPER_VERSION = 10001
+from .utils import torch_dfs, WrapperConsts, CURRENT_WRAPPER_VERSION
 
 def prepare_dinklink_acn_wrapper():
     # expose acn_sampler_sample_wrapper
