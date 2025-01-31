@@ -18,7 +18,7 @@ from .logger import logger
 
 BIGMIN = -(2**53-1)
 BIGMAX = (2**53-1)
-BIGMAX_TENSOR = torch.tensor(BIGMAX)
+BIGMAX_TENSOR = torch.tensor(9999999999.9)
 
 ORIG_PREVIOUS_CONTROLNET = "_orig_previous_controlnet"
 CONTROL_INIT_BY_ACN = "_control_init_by_ACN"
