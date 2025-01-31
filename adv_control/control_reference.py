@@ -162,7 +162,7 @@ class ReferenceAdvanced(ControlBase, AdvancedControlBase):
         self.extra_hooks = extra_hooks.clone() if extra_hooks else self.import_and_create_wrapper_hooks()
         # ContextRef stuff
         self.is_context_ref = False
-        self.contextref_cond_idx = -1
+        self.contextref_cond_idx = -1 # NOTE: does nothing ever since conds got uuids associated with them; can remove
         self.contextref_version = RETURNED_CONTEXTREF_VERSION
 
     @property
