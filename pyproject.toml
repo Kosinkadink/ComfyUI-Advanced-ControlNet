@@ -13,3 +13,25 @@ Repository = "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet"
 PublisherId = "kosinkadink"
 DisplayName = "ComfyUI-Advanced-ControlNet"
 Icon = ""
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [ 
+    "comfyui_advanced_controlnet",
+    "comfyui_advanced_controlnet.adv_control",
+]
+
+[tool.setuptools.package-dir]
+"comfyui_advanced_controlnet" = "."
+"comfyui_advanced_controlnet.adv_control" = "adv_control"
+
+
+[project.entry-points."comfyui.custom_nodes"]
+comfyui_advanced_controlnet = "comfyui_advanced_controlnet"
+
+
+[tool.setuptools.package-data]
+"*" = ["**/*.js" ]
