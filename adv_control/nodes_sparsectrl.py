@@ -1,7 +1,7 @@
 from torch import Tensor
 
 from comfy.cmd import folder_paths
-from nodes import VAEEncode
+from comfy.nodes.base_nodes import VAEEncode
 import comfy.utils
 from comfy.sd import VAE
 
