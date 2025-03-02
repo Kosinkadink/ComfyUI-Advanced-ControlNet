@@ -1,6 +1,6 @@
 from torch import Tensor
 
-from comfyui import folder_paths
+from comfy.cmd import folder_paths
 from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
