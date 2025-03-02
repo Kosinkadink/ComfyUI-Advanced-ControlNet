@@ -1,7 +1,7 @@
 import os
 
 import torch
-import folder_paths
+from comfy.cmd import folder_paths
 
 import numpy as np
 from PIL import Image, ImageOps

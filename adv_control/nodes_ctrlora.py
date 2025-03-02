@@ -1,4 +1,4 @@
-import folder_paths
+from comfy.cmd import folder_paths
 
 from .control_ctrlora import load_ctrlora
 
