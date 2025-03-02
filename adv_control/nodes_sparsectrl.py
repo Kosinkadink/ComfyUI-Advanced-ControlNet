@@ -1,6 +1,6 @@
 from torch import Tensor
 
-import folder_paths
+from comfy.cmd import folder_paths
 from nodes import VAEEncode
 import comfy.utils
 from comfy.sd import VAE

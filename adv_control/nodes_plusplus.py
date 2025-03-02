@@ -1,7 +1,7 @@
 from torch import Tensor
 import math
 
-import folder_paths
+from comfy.cmd import folder_paths
 
 from .control_plusplus import load_controlnetplusplus, PlusPlusType, PlusPlusInput, PlusPlusInputGroup, PlusPlusImageWrapper
 from .utils import BIGMAX
