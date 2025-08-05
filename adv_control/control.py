@@ -3,6 +3,7 @@ from torch import Tensor
 import torch
 import os
 
+import comfy.model_base
 import comfy.ops
 import comfy.utils
 import comfy.model_management
@@ -108,13 +109,13 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         for c in self.extra_conds:
             temp = cond.get(c, None)
             if temp is not None:
-                extra[c] = temp.to(dtype)
+                extra[c] = comfy.model_base.convert_tensor(temp, dtype, x_noisy.device)
 
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
         self.x_noisy_shape = x_noisy.shape
 
-        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.to(dtype), context=context.to(dtype), **extra)
+        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.to(dtype), context=comfy.model_management.cast_to_device(context, x_noisy.device, dtype), **extra)
         return self.control_merge(control, control_prev, output_dtype=None)
 
     def pre_run_advanced(self, *args, **kwargs):
