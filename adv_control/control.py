@@ -333,7 +333,7 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
         if cond.get('c_concat', None) is not None:
             x_noisy = torch.cat([x_noisy] + [cond['c_concat']], dim=1)
 
-        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y, cond=cond)
+        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=comfy.model_management.cast_to_device(context, x_noisy.device, dtype), y=y, cond=cond)
         return self.control_merge(control, control_prev, output_dtype)
 
     def copy(self):
@@ -463,7 +463,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
 
-        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
+        control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=comfy.model_management.cast_to_device(context, x_noisy.device, dtype), y=y)
         return self.control_merge(control, control_prev, output_dtype)
 
     def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, *args, **kwargs):
