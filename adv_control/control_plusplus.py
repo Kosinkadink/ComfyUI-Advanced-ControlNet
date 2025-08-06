@@ -18,6 +18,7 @@ from comfy.controlnet import ControlNet
 #from comfy.t2i_adapter.adapter import ResidualAttentionBlock
 from comfy.ldm.modules.attention import optimized_attention
 import comfy.ops
+import comfy.model_base
 import comfy.model_management
 import comfy.model_detection
 import comfy.utils
@@ -339,7 +340,7 @@ class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
         context = cond.get('crossattn_controlnet', cond['c_crossattn'])
         y = cond.get('y', None)
         if y is not None:
-            y = y.to(dtype)
+            y = comfy.model_base.convert_tensor(y, dtype, x_noisy.device)
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
 

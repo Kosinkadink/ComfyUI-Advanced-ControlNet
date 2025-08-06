@@ -326,7 +326,7 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
         # uses 'y' in new ComfyUI update
         y = cond.get('y', None)
         if y is not None:
-            y = y.to(dtype)
+            y = comfy.model_base.convert_tensor(y, dtype, x_noisy.device)
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
         # concat c_concat if exists (should exist for SVD), doubling channels to 8
@@ -459,7 +459,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
         context = cond['c_crossattn']
         y = cond.get('y', None)
         if y is not None:
-            y = y.to(dtype)
+            y = comfy.model_base.convert_tensor(y, dtype, x_noisy.device)
         timestep = self.model_sampling_current.timestep(t)
         x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
 
