@@ -846,6 +846,10 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
         missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
     if len(missing) > 0 or len(unexpected) > 0:
         logger.info(f"SparseCtrl ControlNet: {missing}, {unexpected}")
+    # cast control_model to the intended dtype; load_state_dict can leave weights
+    # in their on-disk dtype (e.g. comfy's lazy/zero-copy state dict loading), which
+    # would otherwise mismatch the activations at runtime
+    control_model = control_model.to(unet_dtype)
 
     global_average_pooling = False
     filename = os.path.splitext(ckpt_path)[0]
@@ -974,6 +978,10 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
         missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
     if len(missing) > 0 or len(unexpected) > 0:
         logger.info(f"SVD-ControlNet: {missing}, {unexpected}")
+    # cast control_model to the intended dtype; load_state_dict can leave weights
+    # in their on-disk dtype (e.g. comfy's lazy/zero-copy state dict loading), which
+    # would otherwise mismatch the activations at runtime
+    control_model = control_model.to(unet_dtype)
 
     global_average_pooling = False
     filename = os.path.splitext(ckpt_path)[0]
