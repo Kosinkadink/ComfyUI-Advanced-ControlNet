@@ -811,6 +811,7 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
         controlnet_config["operations"] = manual_cast_clean_groupnorm
     else:
         controlnet_config["operations"] = disable_weight_init_clean_groupnorm
+    controlnet_config["dtype"] = unet_dtype
     controlnet_config.pop("out_channels")
     # get proper hint channels
     if use_simplified_conditioning_embedding:
@@ -944,6 +945,7 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
     manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
     if manual_cast_dtype is not None:
         controlnet_config["operations"] = comfy.ops.manual_cast
+    controlnet_config["dtype"] = unet_dtype
     controlnet_config.pop("out_channels")
     controlnet_config["hint_channels"] = controlnet_data["{}input_hint_block.0.weight".format(prefix)].shape[1]
     control_model = SVDControlNet(**controlnet_config)
