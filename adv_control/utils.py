@@ -64,6 +64,7 @@ class ControlWeightType:
     SVD_CONTROLNET = "svd_controlnet"
     SPARSECTRL = "sparsectrl"
     CTRLORA = "ctrlora"
+    ANIMA_VACE = "anima_vace"
 
 
 class ControlWeights:

@@ -534,6 +534,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
         if "lllite" in key:
             controlnet_type = ControlWeightType.CONTROLLLLITE
             break
+        # Anima VACE check
+        elif "control_blocks" in key and "after_proj" in key:
+            controlnet_type = ControlWeightType.ANIMA_VACE
+            break
         # SparseCtrl check
         elif "motion_modules" in key:
             has_motion_modules_key = True
@@ -566,6 +570,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             control = load_svdcontrolnet(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.CTRLORA:
             raise Exception("This is a CtrLoRA; use the Load CtrLoRA Model node.")
+        elif controlnet_type == ControlWeightType.ANIMA_VACE:
+            from .control_anima_vace import load_anima_vace
+            control = load_anima_vace(ckpt_path, controlnet_data=controlnet_data,
+                                     timestep_keyframe=timestep_keyframe, model=model)
     # otherwise, load vanilla ControlNet
     else:
         try:
@@ -820,7 +828,6 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
         controlnet_config["operations"] = manual_cast_clean_groupnorm
     else:
         controlnet_config["operations"] = disable_weight_init_clean_groupnorm
-    controlnet_config["dtype"] = unet_dtype
     controlnet_config.pop("out_channels")
     # get proper hint channels
     if use_simplified_conditioning_embedding:
@@ -855,10 +862,6 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
         missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
     if len(missing) > 0 or len(unexpected) > 0:
         logger.info(f"SparseCtrl ControlNet: {missing}, {unexpected}")
-    # cast control_model to the intended dtype; load_state_dict can leave weights
-    # in their on-disk dtype (e.g. comfy's lazy/zero-copy state dict loading), which
-    # would otherwise mismatch the activations at runtime
-    control_model = control_model.to(unet_dtype)
 
     global_average_pooling = False
     filename = os.path.splitext(ckpt_path)[0]
@@ -958,7 +961,6 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
     manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
     if manual_cast_dtype is not None:
         controlnet_config["operations"] = comfy.ops.manual_cast
-    controlnet_config["dtype"] = unet_dtype
     controlnet_config.pop("out_channels")
     controlnet_config["hint_channels"] = controlnet_data["{}input_hint_block.0.weight".format(prefix)].shape[1]
     control_model = SVDControlNet(**controlnet_config)
@@ -987,10 +989,6 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
         missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
     if len(missing) > 0 or len(unexpected) > 0:
         logger.info(f"SVD-ControlNet: {missing}, {unexpected}")
-    # cast control_model to the intended dtype; load_state_dict can leave weights
-    # in their on-disk dtype (e.g. comfy's lazy/zero-copy state dict loading), which
-    # would otherwise mismatch the activations at runtime
-    control_model = control_model.to(unet_dtype)
 
     global_average_pooling = False
     filename = os.path.splitext(ckpt_path)[0]
