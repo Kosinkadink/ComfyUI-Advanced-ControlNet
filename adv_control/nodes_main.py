@@ -4,6 +4,7 @@ import folder_paths
 from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
+from .control_lllite import load_anima_lllite
 from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper, BIGMAX
 
 from .logger import logger
@@ -63,6 +64,27 @@ class DiffControlNetLoaderAdvanced:
         if is_advanced_controlnet(controlnet):
             controlnet.verify_all_weights()
         return (controlnet,)
+
+
+class AnimaLLLiteLoaderAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model_patch": (folder_paths.get_filename_list("model_patches"), ),
+            },
+            "optional": {
+                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
+            },
+        }
+
+    RETURN_TYPES = ("CONTROL_NET", )
+    FUNCTION = "load_controlnet"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/loaders"
+
+    def load_controlnet(self, model_patch, timestep_kf: TimestepKeyframeGroup=None):
+        model_patch_path = folder_paths.get_full_path_or_raise("model_patches", model_patch)
+        return (load_anima_lllite(model_patch_path, timestep_keyframe=timestep_kf),)
 
 
 class AdvancedControlNetApply:

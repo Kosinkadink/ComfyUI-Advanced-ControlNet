@@ -10,12 +10,22 @@ import os
 import comfy.utils
 import comfy.ops
 import comfy.model_management
+import comfy.model_patcher
 from comfy.model_patcher import ModelPatcher
 from comfy.controlnet import ControlBase
+
+try:
+    import comfy.ldm.anima.lllite as comfy_anima_lllite
+except ImportError:
+    comfy_anima_lllite = None
 
 from .logger import logger
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, ControlWeights, broadcast_image_to_extend, extend_to_batch_size,
                     prepare_mask_batch)
+
+
+class AnimaLLLiteConst:
+    INPAINT_MASK = "anima_lllite_inpaint_mask"
 
 
 # based on set_model_patch code in comfy/model_patcher.py
@@ -369,6 +379,233 @@ class ControlLLLiteAdvanced(ControlBase, AdvancedControlBase):
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
+
+
+class AnimaLLLiteAdvancedPatch:
+    def __init__(self, model_patch, control: 'AnimaLLLiteAdvanced'=None):
+        self.model_patch = model_patch
+        self.control = control
+
+    def set_control(self, control: 'AnimaLLLiteAdvanced') -> 'AnimaLLLiteAdvancedPatch':
+        self.control = control
+        return self
+
+    def clone_with_control(self, control: 'AnimaLLLiteAdvanced') -> 'AnimaLLLiteAdvancedPatch':
+        return AnimaLLLiteAdvancedPatch(self.model_patch, control)
+
+    def __call__(self, args):
+        if not self.control.should_run():
+            return args
+
+        x = args["x"]
+        if x.shape[2] != 1:
+            raise ValueError(f"Anima LLLite only supports T=1, got T={x.shape[2]}")
+
+        target_height = x.shape[-2] * 8
+        target_width = x.shape[-1] * 8
+        image = self.control.prepare_batched_tensor(self.control.cond_hint_original, x.shape[0])[:, :3]
+        image = comfy.utils.common_upscale(image, target_width, target_height, "bicubic", crop="center").clamp(0.0, 1.0)
+        image = image.to(device=x.device, dtype=x.dtype) * 2.0 - 1.0
+
+        if self.model_patch.model.cond_in_channels == 4:
+            mask = self.control.weights.extras.get(AnimaLLLiteConst.INPAINT_MASK)
+            if mask is None:
+                raise ValueError(
+                    "Anima LLLite inpainting models require an inpaint mask. Connect a MASK to Anima LLLite Extras, "
+                    "connect its cn_extras output to Default Weights, then connect CN_WEIGHTS to weights_override on Apply Advanced ControlNet."
+                )
+            if mask.ndim == 3:
+                mask = mask.unsqueeze(1)
+            if mask.ndim != 4 or mask.shape[1] != 1:
+                raise ValueError(f"Anima LLLite mask must have one channel, got shape {tuple(mask.shape)}")
+            if image.shape[0] > 1:
+                mask = self.control.prepare_batched_tensor(mask, image.shape[0], except_one=False)
+            mask = comfy.utils.common_upscale(mask.float(), target_width, target_height, "nearest-exact", crop="center")
+            if mask.shape[0] != image.shape[0]:
+                if image.shape[0] % mask.shape[0] != 0:
+                    raise ValueError(f"Anima LLLite mask batch {mask.shape[0]} cannot be broadcast to image batch {image.shape[0]}")
+                mask = mask.repeat(image.shape[0] // mask.shape[0], 1, 1, 1)
+            mask = (mask >= 0.5).to(device=x.device, dtype=x.dtype)
+            if self.model_patch.model.inpaint_masked_input:
+                image = image * (mask < 0.5).to(image.dtype)
+            image = torch.cat((image, mask * 2.0 - 1.0), dim=1)
+
+        cond_emb = self.model_patch.model.encode_conditioning(image)
+        multiplier, weight_mask = self.control.prepare_multiplier(args["img"])
+        args["transformer_options"]["model_patch_data"][self] = (cond_emb, multiplier, weight_mask)
+        return args
+
+    def to(self, device_or_dtype):
+        return self
+
+    def models(self):
+        return [self.model_patch]
+
+
+class AnimaLLLiteAdvancedAttentionPatch:
+    def __init__(self, patch: AnimaLLLiteAdvancedPatch, targets):
+        self.patch = patch
+        self.targets = targets
+
+    def __call__(self, q, k, v, pe=None, attn_mask=None, extra_options=None):
+        patch_data = extra_options["model_patch_data"].get(self.patch)
+        if patch_data is None:
+            return {"q": q, "k": k, "v": v, "pe": pe, "attn_mask": attn_mask}
+
+        cond_emb, multiplier, weight_mask = patch_data
+        block_index = extra_options["block_index"]
+        strength = self.patch.control.get_block_strength(block_index, multiplier, weight_mask)
+        values = {"q": q, "k": k, "v": v}
+        for value_name, target in self.targets.items():
+            values[value_name] = self.patch.model_patch.model.apply(values[value_name], cond_emb, block_index, target, strength)
+        return {"q": values["q"], "k": values["k"], "v": values["v"], "pe": pe, "attn_mask": attn_mask}
+
+
+class AnimaLLLiteAdvancedMLPPatch:
+    def __init__(self, patch: AnimaLLLiteAdvancedPatch):
+        self.patch = patch
+
+    def __call__(self, args):
+        patch_data = args["transformer_options"]["model_patch_data"].get(self.patch)
+        if patch_data is None:
+            return args
+
+        cond_emb, multiplier, weight_mask = patch_data
+        block_index = args["transformer_options"]["block_index"]
+        strength = self.patch.control.get_block_strength(block_index, multiplier, weight_mask)
+        args["x"] = self.patch.model_patch.model.apply(args["x"], cond_emb, block_index, "mlp_layer1", strength)
+        return args
+
+
+class AnimaLLLiteAdvanced(ControlBase, AdvancedControlBase):
+    def __init__(self, model_patch, timestep_keyframes: TimestepKeyframeGroup):
+        ControlBase.__init__(self)
+        AdvancedControlBase.__init__(self, super(), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controllllite())
+        self.model_patch = model_patch
+        self.patch = AnimaLLLiteAdvancedPatch(model_patch, self)
+        self.patch_attn1 = AnimaLLLiteAdvancedAttentionPatch(
+            self.patch,
+            {"q": "self_attn_q_proj", "k": "self_attn_k_proj", "v": "self_attn_v_proj"},
+        )
+        self.patch_attn2 = AnimaLLLiteAdvancedAttentionPatch(self.patch, {"q": "cross_attn_q_proj"})
+        self.patch_mlp = AnimaLLLiteAdvancedMLPPatch(self.patch)
+
+    def prepare_batched_tensor(self, tensor: Tensor, target_batch: int, except_one=True) -> Tensor:
+        if self.sub_idxs is not None:
+            if tensor.shape[0] < self.full_latent_length:
+                tensor = extend_to_batch_size(tensor, self.full_latent_length)
+            tensor = tensor[self.sub_idxs]
+        if tensor.shape[0] != target_batch:
+            tensor = broadcast_image_to_extend(tensor, target_batch, self.batched_number, except_one=except_one)
+        return tensor
+
+    def prepare_effect_mask(self, mask: Tensor, img: Tensor) -> Tensor:
+        mask = self.prepare_batched_tensor(mask, img.shape[0], except_one=False)
+        mask = torch.nn.functional.interpolate(
+            mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).float(),
+            size=(img.shape[2], img.shape[3]),
+            mode="bilinear",
+        )
+        return mask.flatten(2).transpose(1, 2).to(device=img.device, dtype=img.dtype)
+
+    def prepare_multiplier(self, img: Tensor):
+        multiplier = self.strength * self._current_timestep_keyframe.strength
+        token_multiplier = None
+
+        masks = [self.mask_cond_hint_original, self._current_timestep_keyframe.mask_hint_orig]
+        for mask in masks:
+            if mask is not None:
+                mask_multiplier = self.prepare_effect_mask(mask, img)
+                token_multiplier = mask_multiplier if token_multiplier is None else token_multiplier * mask_multiplier
+
+        flat_img = img.flatten(1, 3)
+        if self.latent_keyframes is not None:
+            latent_multiplier = self.calc_latent_keyframe_mults(flat_img, self.batched_number)
+            token_multiplier = latent_multiplier if token_multiplier is None else token_multiplier * latent_multiplier
+
+        if self.weights.has_uncond_multiplier and self.cond_or_uncond is not None:
+            batch_multiplier = torch.ones((img.shape[0], 1, 1), dtype=img.dtype, device=img.device)
+            actual_length = img.shape[0] // self.batched_number
+            for idx, cond_type in enumerate(self.cond_or_uncond):
+                if cond_type == 1:
+                    batch_multiplier[actual_length * idx:actual_length * (idx + 1)] *= self.weights.uncond_multiplier
+            token_multiplier = batch_multiplier if token_multiplier is None else token_multiplier * batch_multiplier
+
+        weight_mask = None
+        if self.weights.weight_mask is not None:
+            weight_mask = self.prepare_effect_mask(self.weights.weight_mask, img)
+
+        if token_multiplier is not None:
+            multiplier = token_multiplier * multiplier
+        return multiplier, weight_mask
+
+    def get_block_strength(self, block_index: int, multiplier, weight_mask):
+        block_weight = 1.0
+        if self.weights.weight_type == "universal":
+            exponent = self.model_patch.model.block_count - block_index
+            if weight_mask is not None:
+                block_weight = torch.pow(weight_mask, exponent)
+            else:
+                block_weight = self.weights.base_multiplier ** exponent
+        elif self.weights.weights_input is not None and block_index < len(self.weights.weights_input):
+            block_weight = self.weights.weights_input[block_index]
+        return multiplier * block_weight
+
+    def pre_run_advanced(self, *args, **kwargs):
+        AdvancedControlBase.pre_run_advanced(self, *args, **kwargs)
+        self.patch.set_control(self)
+
+    def get_control_advanced(self, x_noisy: Tensor, t, cond, batched_number: int, transformer_options: dict):
+        control_prev = None
+        if self.previous_controlnet is not None:
+            control_prev = self.previous_controlnet.get_control(x_noisy, t, cond, batched_number, transformer_options)
+        if not self.should_run():
+            return control_prev
+
+        set_model_patch(transformer_options, self.patch.set_control(self), "post_input")
+        set_model_attn1_patch(transformer_options, self.patch_attn1)
+        set_model_attn2_patch(transformer_options, self.patch_attn2)
+        set_model_patch(transformer_options, self.patch_mlp, "mlp_patch")
+        return control_prev
+
+    def get_models(self):
+        models = super().get_models()
+        models.append(self.model_patch)
+        return models
+
+    def copy(self):
+        copied = AnimaLLLiteAdvanced(self.model_patch, self.timestep_keyframes)
+        self.copy_to(copied)
+        self.copy_to_advanced(copied)
+        return copied
+
+
+def load_anima_lllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, metadata=None, timestep_keyframe: TimestepKeyframeGroup=None):
+    if comfy_anima_lllite is None:
+        raise RuntimeError("Anima LLLite requires a newer version of ComfyUI. Please update ComfyUI.")
+    if controlnet_data is None or metadata is None:
+        loaded_data, loaded_metadata = comfy.utils.load_torch_file(ckpt_path, safe_load=True, return_metadata=True)
+        if controlnet_data is None:
+            controlnet_data = loaded_data
+        metadata = loaded_metadata
+
+    dtype = comfy.utils.weight_dtype(controlnet_data)
+    model = comfy_anima_lllite.AnimaLLLite(
+        controlnet_data,
+        metadata,
+        device=comfy.model_management.unet_offload_device(),
+        dtype=dtype,
+        operations=comfy.ops.manual_cast,
+    )
+    patcher_type = getattr(comfy.model_patcher, "CoreModelPatcher", ModelPatcher)
+    model_patcher = patcher_type(
+        model,
+        load_device=comfy.model_management.get_torch_device(),
+        offload_device=comfy.model_management.unet_offload_device(),
+    )
+    is_dynamic = getattr(model_patcher, "is_dynamic", lambda: False)()
+    model.load_state_dict(controlnet_data, assign=is_dynamic)
+    return AnimaLLLiteAdvanced(model_patcher, timestep_keyframe)
 
 
 def load_controllllite(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, timestep_keyframe: TimestepKeyframeGroup=None):
