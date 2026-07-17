@@ -1,6 +1,7 @@
 from torch import Tensor
 import math
 
+import comfy.utils
 import folder_paths
 
 from .control_plusplus import load_controlnetplusplus, PlusPlusType, PlusPlusInput, PlusPlusInputGroup, PlusPlusImageWrapper
@@ -47,9 +48,16 @@ class PlusPlusLoaderSingle:
 
     def load_controlnet_plusplus(self, name: str, control_type: str):
         controlnet_path = folder_paths.get_full_path("controlnet", name)
-        controlnet = load_controlnetplusplus(controlnet_path)
-        controlnet.single_control_type = control_type
-        controlnet.verify_control_type(name)
+        # Auto-detect: check for ControlNet++ signature
+        sd = comfy.utils.load_torch_file(controlnet_path, safe_load=True)
+        is_plusplus = any("task_embedding" in k for k in sd)
+        if is_plusplus:
+            controlnet = load_controlnetplusplus(controlnet_path)
+            controlnet.single_control_type = control_type
+            controlnet.verify_control_type(name)
+        else:
+            from .control import load_controlnet
+            controlnet = load_controlnet(controlnet_path)
         return (controlnet,)
 
 

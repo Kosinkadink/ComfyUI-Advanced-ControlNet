@@ -15,6 +15,7 @@ from comfy.model_patcher import ModelPatcher
 from .control_sparsectrl import SparseControlNet, SparseSettings, SparseConst, InterfaceAnimateDiffModel, create_sparse_modelpatcher, load_sparsectrl_motionmodel
 from .control_lllite import LLLiteModule, LLLitePatch, load_controllllite
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
+from .control_plusplus import load_controlnetplusplus
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException, Extras,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, WrapperConsts, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
                     broadcast_image_to_extend, extend_to_batch_size, ORIG_PREVIOUS_CONTROLNET, CONTROL_INIT_BY_ACN)
@@ -537,7 +538,8 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             has_temporal_res_block_key = True
         # ControlNet++ check
         elif "task_embedding" in key:
-            pass
+            controlnet_type = ControlWeightType.CONTROLNETPLUSPLUS
+            break
         # CtrLoRA check
         elif "lora_layer" in key:
             controlnet_type = ControlWeightType.CTRLORA
@@ -557,6 +559,8 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             control = load_svdcontrolnet(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.CTRLORA:
             raise Exception("This is a CtrLoRA; use the Load CtrLoRA Model node.")
+        elif controlnet_type == ControlWeightType.CONTROLNETPLUSPLUS:
+            control = load_controlnetplusplus(ckpt_path, timestep_keyframe=timestep_keyframe)
     # otherwise, load vanilla ControlNet
     else:
         try:

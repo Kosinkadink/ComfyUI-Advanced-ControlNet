@@ -11,6 +11,7 @@ from collections import OrderedDict
 
 
 from comfy.ldm.modules.diffusionmodules.util import (zero_module, timestep_embedding)
+from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepEmbedSequential
 
 from comfy.cldm.cldm import ControlNet as ControlNetCLDM
 import comfy.cldm.cldm
@@ -37,10 +38,11 @@ class PlusPlusType:
     SEGMENT = "segment"
     TILE = "tile"
     REPAINT = "inpaint/outpaint"
+    FUSE = "fuse (chenkincontrol-only)"
     NONE = "none"
-    _LIST_WITH_NONE = [OPENPOSE, DEPTH, THICKLINE, THINLINE, NORMAL, SEGMENT, TILE, REPAINT, NONE]
-    _LIST = [OPENPOSE, DEPTH, THICKLINE, THINLINE, NORMAL, SEGMENT, TILE, REPAINT]
-    _DICT = {OPENPOSE: 0, DEPTH: 1, THICKLINE: 2, THINLINE: 3, NORMAL: 4, SEGMENT: 5, TILE: 6, REPAINT: 7, NONE: -1}
+    _LIST_WITH_NONE = [OPENPOSE, DEPTH, THICKLINE, THINLINE, NORMAL, SEGMENT, TILE, REPAINT, FUSE, NONE]
+    _LIST = [OPENPOSE, DEPTH, THICKLINE, THINLINE, NORMAL, SEGMENT, TILE, REPAINT, FUSE]
+    _DICT = {OPENPOSE: 0, DEPTH: 1, THICKLINE: 2, THINLINE: 3, NORMAL: 4, SEGMENT: 5, TILE: 6, REPAINT: 7, FUSE: 8, NONE: -1}
 
     @classmethod
     def to_idx(cls, control_type: str):
@@ -221,6 +223,35 @@ class ControlNetPlusPlus(ControlNetCLDM):
         out_middle.append(self.middle_block_out(h, emb, context))
 
         return {"middle": out_middle, "output": out_output}
+
+
+class ControlNetPlusPlusChenkin(ControlNetPlusPlus):
+    """chenkincontrol-only variant: wider input_hint_block channels [48, 96, 192, 384]."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        operations: comfy.ops.disable_weight_init = kwargs.get("operations", comfy.ops.disable_weight_init)
+        device = kwargs.get("device", None)
+        dims = 2
+        hint_channels = kwargs.get("hint_channels", 3)
+        c0, c1, c2, c3 = 48, 96, 192, 384
+        self.input_hint_block = TimestepEmbedSequential(
+            operations.conv_nd(dims, hint_channels, c0, 3, padding=1, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c0, c0, 3, padding=1, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c0, c1, 3, padding=1, stride=2, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c1, c1, 3, padding=1, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c1, c2, 3, padding=1, stride=2, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c2, c2, 3, padding=1, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c2, c3, 3, padding=1, stride=2, dtype=self.dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, c3, self.model_channels, 3, padding=1, dtype=self.dtype, device=device),
+        )
 
 
 class ControlNetPlusPlusAdvanced(ControlNet, AdvancedControlBase):
@@ -446,30 +477,40 @@ def load_controlnetplusplus(ckpt_path: str, timestep_keyframe: TimestepKeyframeG
     controlnet_config["dtype"] = unet_dtype
     controlnet_config.pop("out_channels")
     controlnet_config["hint_channels"] = controlnet_data["{}input_hint_block.0.weight".format(prefix)].shape[1]
-    control_model = ControlNetPlusPlus(**controlnet_config)
 
-    if pth:
-        if 'difference' in controlnet_data:
-            if model is not None:
-                comfy.model_management.load_models_gpu([model])
-                model_sd = model.model_state_dict()
-                for x in controlnet_data:
-                    c_m = "control_model."
-                    if x.startswith(c_m):
-                        sd_key = "diffusion_model.{}".format(x[len(c_m):])
-                        if sd_key in model_sd:
-                            cd = controlnet_data[x]
-                            cd += model_sd[sd_key].type(cd.dtype).to(cd.device)
-            else:
-                logger.warning("WARNING: Loaded a diff controlnet without a model. It will very likely not work.")
+    # Diff-controlnet side effects only depend on controlnet_data; apply once before trying model variants.
+    if pth and 'difference' in controlnet_data:
+        if model is not None:
+            comfy.model_management.load_models_gpu([model])
+            model_sd = model.model_state_dict()
+            for x in controlnet_data:
+                c_m = "control_model."
+                if x.startswith(c_m):
+                    sd_key = "diffusion_model.{}".format(x[len(c_m):])
+                    if sd_key in model_sd:
+                        cd = controlnet_data[x]
+                        cd += model_sd[sd_key].type(cd.dtype).to(cd.device)
+        else:
+            logger.warning("WARNING: Loaded a diff controlnet without a model. It will very likely not work.")
 
-        class WeightsLoader(torch.nn.Module):
-            pass
-        w = WeightsLoader()
-        w.control_model = control_model
-        missing, unexpected = w.load_state_dict(controlnet_data, strict=False)
-    else:
-        missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
+    def _load_with(cls):
+        m = cls(**controlnet_config)
+        if pth:
+            class WeightsLoader(torch.nn.Module):
+                pass
+            w = WeightsLoader()
+            w.control_model = m
+            miss, unexp = w.load_state_dict(controlnet_data, strict=False)
+        else:
+            miss, unexp = m.load_state_dict(controlnet_data, strict=False)
+        return m, miss, unexp
+
+    # Prefer chenkincontrol variant (wider input_hint_block); fall back to standard ControlNet++ on size mismatch.
+    try:
+        control_model, missing, unexpected = _load_with(ControlNetPlusPlusChenkin)
+    except RuntimeError as e:
+        logger.info("ControlNet++ chenkincontrol load failed ({}); falling back to standard ControlNet++.".format(e))
+        control_model, missing, unexpected = _load_with(ControlNetPlusPlus)
 
     if len(missing) > 0:
         logger.warning("missing ControlNet++ keys: {}".format(missing))
