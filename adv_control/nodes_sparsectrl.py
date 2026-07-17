@@ -134,9 +134,6 @@ class RgbSparseCtrlPreprocessor:
                 "vae": ("VAE", ),
                 "latent_size": ("LATENT", ),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -169,9 +166,6 @@ class SparseWeightExtras:
                 "sparse_nonhint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
                 "sparse_mask_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CN_WEIGHTS_EXTRAS", )

@@ -86,9 +86,6 @@ class ScaledSoftUniversalWeightsDeprecated:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -126,9 +123,6 @@ class SoftControlNetWeightsDeprecated:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     DEPRECATED = True
@@ -172,9 +166,6 @@ class CustomControlNetWeightsDeprecated:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     DEPRECATED = True
@@ -209,9 +200,6 @@ class SoftT2IAdapterWeightsDeprecated:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     DEPRECATED = True
@@ -244,9 +232,6 @@ class CustomT2IAdapterWeightsDeprecated:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     DEPRECATED = True
@@ -285,9 +270,6 @@ class AdvancedControlNetApplyDEPR:
                 "model_optional": ("MODEL",),
                 "vae_optional": ("VAE",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     DEPRECATED = True
@@ -328,9 +310,6 @@ class AdvancedControlNetApplySingleDEPR:
                 "model_optional": ("MODEL",),
                 "vae_optional": ("VAE",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     DEPRECATED = True
@@ -392,9 +371,6 @@ class DiffControlNetLoaderAdvancedDEPR:
             "optional": {
                 "tk_optional": ("TIMESTEP_KEYFRAME", ),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     DEPRECATED = True
