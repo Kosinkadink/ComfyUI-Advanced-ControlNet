@@ -1,6 +1,7 @@
 from torch import Tensor
 import torch
 from .utils import TimestepKeyframe, TimestepKeyframeGroup, ControlWeights, Extras, get_properly_arranged_t2i_weights, linear_conversion
+from .control_lllite import AnimaLLLiteConst
 from .logger import logger
 
 
@@ -238,6 +239,39 @@ class CustomControlNetWeightsFlux:
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
 
 
+class CustomControlNetWeightsAnima:
+    @classmethod
+    def INPUT_TYPES(s):
+        required = {
+            f"block_{index}": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001})
+            for index in range(28)
+        }
+        return {
+            "required": required,
+            "optional": {
+                "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            },
+        }
+
+    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = WEIGHTS_RETURN_NAMES
+    FUNCTION = "load_weights"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/ControlNet"
+
+    def load_weights(self, uncond_multiplier: float=1.0, cn_extras: dict[str]={}, **kwargs):
+        weights = [kwargs[f"block_{index}"] for index in range(28)]
+        control_weights = ControlWeights.controllllite(
+            weights_input=weights,
+            uncond_multiplier=uncond_multiplier,
+            extras=cn_extras,
+        )
+        return (control_weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=control_weights)))
+
+
 class SoftT2IAdapterWeights:
     @classmethod
     def INPUT_TYPES(s):
@@ -326,4 +360,30 @@ class ExtrasMiddleMultNode:
     def create_extras(self, middle_mult: float, cn_extras: dict[str]={}):
         cn_extras = cn_extras.copy()
         cn_extras[Extras.MIDDLE_MULT] = middle_mult
+        return (cn_extras,)
+
+
+class AnimaLLLiteExtras:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "inpaint_mask": ("MASK",),
+            },
+            "optional": {
+                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+            },
+            "hidden": {
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            },
+        }
+
+    RETURN_TYPES = ("CN_WEIGHTS_EXTRAS",)
+    RETURN_NAMES = ("cn_extras",)
+    FUNCTION = "create_extras"
+    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/weights/extras"
+
+    def create_extras(self, inpaint_mask: Tensor, cn_extras: dict[str]={}):
+        cn_extras = cn_extras.copy()
+        cn_extras[AnimaLLLiteConst.INPAINT_MASK] = inpaint_mask.clone()
         return (cn_extras,)

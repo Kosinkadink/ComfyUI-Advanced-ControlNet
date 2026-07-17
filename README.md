@@ -12,7 +12,7 @@ ControlNet preprocessors are available through [comfyui_controlnet_aux](https://
 - Replicate ***"ControlNet is more important"*** feature from sd-webui-controlnet extension via ***uncond_multiplier*** on ***Soft Weights***
   - uncond_multiplier=0.0 gives identical results of auto1111's feature, but values between 0.0 and 1.0 can be used without issue to granularly control the setting.
 - ControlNet, T2IAdapter, and ControlLoRA support for sliding context windows
-- ControlLLLite support
+- ControlLLLite support, including Anima LLLite v2 and inpainting models
 - ControlNet++ support
 - CtrLoRA support
   - Relevant models linked on [CtrLoRA github page](https://github.com/xyfJASON/ctrlora)
@@ -82,6 +82,12 @@ Loads a ControlNet model and converts it into an Advanced version that supports 
 
 ### Outputs
 - 🟪***CONTROL_NET***: loaded Advanced ControlNet
+
+## Anima LLLite v2
+
+Place Anima LLLite v2 files in `ComfyUI/models/model_patches` and load them with **Load Anima LLLite Model**. The regular Advanced ControlNet loader also recognizes these models when they are placed in `ComfyUI/models/controlnet`.
+
+Use the loaded model with **Apply Advanced ControlNet**. For the 4-channel inpainting model, pass the source mask through **Anima LLLite Extras** into the `cn_extras` input of a weights node; `mask_optional` on the Apply node remains the Advanced-ControlNet effect mask. **ControlNet Custom Weights [Anima]** provides one weight for each of Anima's 28 transformer blocks. Timestep keyframes, latent keyframes, soft weights, CFG/unconditional weighting, effect masks, and stacked controls work the same as with other Advanced-ControlNet models.
 
 ## Timestep Keyframe
 ![image](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet/assets/7365912/404f3cfe-5852-4eed-935b-37e32493d1b5)

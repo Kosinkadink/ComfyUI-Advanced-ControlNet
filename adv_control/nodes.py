@@ -1,10 +1,11 @@
 import comfy.sample
 
-from .nodes_main import (ControlNetLoaderAdvanced, DiffControlNetLoaderAdvanced,
+from .nodes_main import (ControlNetLoaderAdvanced, DiffControlNetLoaderAdvanced, AnimaLLLiteLoaderAdvanced,
                          AdvancedControlNetApply, AdvancedControlNetApplySingle)
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights,
                            SoftControlNetWeightsSD15, CustomControlNetWeightsSD15, CustomControlNetWeightsFlux,
-                           SoftT2IAdapterWeights, CustomT2IAdapterWeights, ExtrasMiddleMultNode)
+                           CustomControlNetWeightsAnima, SoftT2IAdapterWeights, CustomT2IAdapterWeights, ExtrasMiddleMultNode,
+                           AnimaLLLiteExtras)
 from .nodes_keyframes import (LatentKeyframeGroupNode, LatentKeyframeInterpolationNode, LatentKeyframeBatchedGroupNode, LatentKeyframeNode,
                               TimestepKeyframeNode, TimestepKeyframeInterpolationNode, TimestepKeyframeFromStrengthListNode)
 from .nodes_sparsectrl import SparseCtrlMergedLoaderAdvanced, SparseCtrlLoaderAdvanced, SparseIndexMethodNode, SparseSpreadMethodNode, RgbSparseCtrlPreprocessor, SparseWeightExtras
@@ -36,16 +37,19 @@ NODE_CLASS_MAPPINGS = {
     # Loaders
     "ACN_ControlNetLoaderAdvanced": ControlNetLoaderAdvanced,
     "ACN_DiffControlNetLoaderAdvanced": DiffControlNetLoaderAdvanced,
+    "ACN_AnimaLLLiteLoaderAdvanced": AnimaLLLiteLoaderAdvanced,
     # Weights
     "ACN_ScaledSoftControlNetWeights": ScaledSoftUniversalWeights,
     "ScaledSoftMaskedUniversalWeights": ScaledSoftMaskedUniversalWeights,
     "ACN_SoftControlNetWeightsSD15": SoftControlNetWeightsSD15,
     "ACN_CustomControlNetWeightsSD15": CustomControlNetWeightsSD15,
     "ACN_CustomControlNetWeightsFlux": CustomControlNetWeightsFlux,
+    "ACN_CustomControlNetWeightsAnima": CustomControlNetWeightsAnima,
     "ACN_SoftT2IAdapterWeights": SoftT2IAdapterWeights,
     "ACN_CustomT2IAdapterWeights": CustomT2IAdapterWeights,
     "ACN_DefaultUniversalWeights": DefaultWeights,
     "ACN_ExtrasMiddleMult": ExtrasMiddleMultNode,
+    "ACN_AnimaLLLiteExtras": AnimaLLLiteExtras,
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": RgbSparseCtrlPreprocessor,
     "ACN_SparseCtrlLoaderAdvanced": SparseCtrlLoaderAdvanced,
@@ -93,16 +97,19 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Loaders
     "ACN_ControlNetLoaderAdvanced": "Load Advanced ControlNet Model 🛂🅐🅒🅝",
     "ACN_DiffControlNetLoaderAdvanced": "Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝",
+    "ACN_AnimaLLLiteLoaderAdvanced": "Load Anima LLLite Model 🛂🅐🅒🅝",
     # Weights
     "ACN_ScaledSoftControlNetWeights": "Scaled Soft Weights 🛂🅐🅒🅝",
     "ScaledSoftMaskedUniversalWeights": "Scaled Soft Masked Weights 🛂🅐🅒🅝",
     "ACN_SoftControlNetWeightsSD15": "ControlNet Soft Weights [SD1.5] 🛂🅐🅒🅝",
     "ACN_CustomControlNetWeightsSD15": "ControlNet Custom Weights [SD1.5] 🛂🅐🅒🅝",
     "ACN_CustomControlNetWeightsFlux": "ControlNet Custom Weights [Flux] 🛂🅐🅒🅝",
+    "ACN_CustomControlNetWeightsAnima": "ControlNet Custom Weights [Anima] 🛂🅐🅒🅝",
     "ACN_SoftT2IAdapterWeights": "T2IAdapter Soft Weights 🛂🅐🅒🅝",
     "ACN_CustomT2IAdapterWeights": "T2IAdapter Custom Weights 🛂🅐🅒🅝",
     "ACN_DefaultUniversalWeights": "Default Weights 🛂🅐🅒🅝",
     "ACN_ExtrasMiddleMult": "Middle Weight Extras 🛂🅐🅒🅝",
+    "ACN_AnimaLLLiteExtras": "Anima LLLite Extras 🛂🅐🅒🅝",
     # SparseCtrl
     "ACN_SparseCtrlRGBPreprocessor": "RGB SparseCtrl 🛂🅐🅒🅝",
     "ACN_SparseCtrlLoaderAdvanced": "Load SparseCtrl Model 🛂🅐🅒🅝",

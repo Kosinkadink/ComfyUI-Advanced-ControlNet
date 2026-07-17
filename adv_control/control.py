@@ -13,7 +13,7 @@ from comfy.controlnet import ControlBase, ControlNet, ControlNetSD35, ControlLor
 from comfy.model_patcher import ModelPatcher
 
 from .control_sparsectrl import SparseControlNet, SparseSettings, SparseConst, InterfaceAnimateDiffModel, create_sparse_modelpatcher, load_sparsectrl_motionmodel
-from .control_lllite import LLLiteModule, LLLitePatch, load_controllllite
+from .control_lllite import LLLiteModule, LLLitePatch, load_anima_lllite, load_controllllite
 from .control_svd import svd_unet_config_from_diffusers_unet, SVDControlNet, svd_unet_to_diffusers
 from .utils import (AdvancedControlBase, TimestepKeyframeGroup, LatentKeyframeGroup, AbstractPreprocWrapper, ControlWeightType, ControlWeights, WeightTypeException, Extras,
                     manual_cast_clean_groupnorm, disable_weight_init_clean_groupnorm, WrapperConsts, prepare_mask_batch, get_properly_arranged_t2i_weights, load_torch_file_with_dict_factory,
@@ -510,7 +510,7 @@ class SparseCtrlAdvanced(ControlNetAdvanced):
 
 
 def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, model=None):
-    controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+    controlnet_data, metadata = comfy.utils.load_torch_file(ckpt_path, safe_load=True, return_metadata=True)
     # from pathlib import Path
     # log_name = ckpt_path.split('\\')[-1]
     # with open(Path(__file__).parent.parent.parent / rf"keys_{log_name}.txt", "w") as afile:
@@ -519,6 +519,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
     control = None
     # check if a non-vanilla ControlNet
     controlnet_type = ControlWeightType.DEFAULT
+    is_anima_lllite = (
+        "lllite_conditioning1.conv1.weight" in controlnet_data
+        and any(key.startswith("lllite_dit_blocks_") for key in controlnet_data)
+    )
     has_controlnet_key = False
     has_motion_modules_key = False
     has_temporal_res_block_key = False
@@ -548,7 +552,9 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
     elif has_controlnet_key and has_temporal_res_block_key:
         controlnet_type = ControlWeightType.SVD_CONTROLNET
 
-    if controlnet_type != ControlWeightType.DEFAULT:
+    if is_anima_lllite:
+        control = load_anima_lllite(ckpt_path, controlnet_data=controlnet_data, metadata=metadata, timestep_keyframe=timestep_keyframe)
+    elif controlnet_type != ControlWeightType.DEFAULT:
         if controlnet_type == ControlWeightType.CONTROLLLLITE:
             control = load_controllllite(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.SPARSECTRL:
@@ -990,4 +996,3 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
 
     control = SVDControlNetAdvanced(control_model, timestep_keyframes=timestep_keyframe, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
     return control
-
