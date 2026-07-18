@@ -114,7 +114,7 @@ class AdvancedControlNetApply(io.ComfyNode):
                          mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None, control_apply_to_uncond=False, extra_concat=None):
-        if strength == 0:
+        if strength == 0 or (mask_optional is not None and mask_optional.count_nonzero().item() == 0):
             return io.NodeOutput(positive, negative)
         if extra_concat is None:
             extra_concat = []

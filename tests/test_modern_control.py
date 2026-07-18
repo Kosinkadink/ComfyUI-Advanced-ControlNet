@@ -156,6 +156,26 @@ class T2IAdapterTests(unittest.TestCase):
         self.assertIs(control.cond_hint_original, original_hint)
 
 
+class AdvancedControlNetApplyTests(unittest.TestCase):
+    def test_all_zero_effect_mask_returns_original_conditioning(self):
+        positive = [[sentinel.positive_tensor, {"name": "positive"}]]
+        negative = [[sentinel.negative_tensor, {"name": "negative"}]]
+
+        result = AdvancedControlNetApply.execute(
+            positive=positive,
+            negative=negative,
+            control_net=sentinel.control_net,
+            image=torch.ones((1, 8, 8, 3)),
+            strength=1.0,
+            start_percent=0.0,
+            end_percent=1.0,
+            mask_optional=torch.zeros((1, 8, 8)),
+        )
+
+        self.assertIs(result.args[0], positive)
+        self.assertIs(result.args[1], negative)
+
+
 class AdvancedInpaintingApplyTests(unittest.TestCase):
     def test_source_mask_and_effect_mask_stay_independent(self):
         image = torch.ones((1, 2, 2, 3))
