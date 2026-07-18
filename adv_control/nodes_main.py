@@ -1,123 +1,120 @@
+from comfy_api.latest import io
 from torch import Tensor
 
 import folder_paths
-from comfy.model_patcher import ModelPatcher
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
 from .control_lllite import load_anima_lllite
-from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper, BIGMAX
+from .utils import ControlWeights, LatentKeyframeGroup, TimestepKeyframeGroup, AbstractPreprocWrapper
 
-from .logger import logger
-
-
-class ControlNetLoaderAdvanced:
+class ControlNetLoaderAdvanced(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "cnet": (folder_paths.get_filename_list("controlnet"), ),
-            },
-            "optional": {
-                "_tk_opt": ("TIMESTEP_KEYFRAME", ),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_ControlNetLoaderAdvanced',
+            display_name='Load Advanced ControlNet Model 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝',
+            inputs=[
+                io.Combo.Input('cnet', options=folder_paths.get_filename_list("controlnet")),
+                io.Custom('TIMESTEP_KEYFRAME').Input('_tk_opt', optional=True)
+            ],
+            outputs=[
+                io.ControlNet.Output('CONTROL_NET', is_output_list=False)
+            ]
+        )
 
-    RETURN_TYPES = ("CONTROL_NET", )
-    FUNCTION = "load_controlnet"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
-
-    def load_controlnet(self, cnet,
+    @classmethod
+    def execute(cls, cnet,
                         _tk_opt: TimestepKeyframeGroup=None,
                         ):
         controlnet_path = folder_paths.get_full_path("controlnet", cnet)
         controlnet = load_controlnet(controlnet_path, _tk_opt)
-        return (controlnet,)
+        return io.NodeOutput(controlnet,)
     
 
-class DiffControlNetLoaderAdvanced:
+class DiffControlNetLoaderAdvanced(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "cnet": (folder_paths.get_filename_list("controlnet"), )
-            },
-            "optional": {
-                "_tk_opt": ("TIMESTEP_KEYFRAME", ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_DiffControlNetLoaderAdvanced',
+            display_name='Load Advanced ControlNet Model (diff) 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝',
+            inputs=[
+                io.Model.Input('model'),
+                io.Combo.Input('cnet', options=folder_paths.get_filename_list("controlnet")),
+                io.Custom('TIMESTEP_KEYFRAME').Input('_tk_opt', optional=True)
+            ],
+            outputs=[
+                io.ControlNet.Output('CONTROL_NET', is_output_list=False)
+            ]
+        )
     
-    RETURN_TYPES = ("CONTROL_NET", )
-    FUNCTION = "load_controlnet"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
-
-    def load_controlnet(self, cnet, model,
+    @classmethod
+    def execute(cls, cnet, model,
                         _tk_opt: TimestepKeyframeGroup=None,
                         ):
         controlnet_path = folder_paths.get_full_path("controlnet", cnet)
         controlnet = load_controlnet(controlnet_path, _tk_opt, model)
         if is_advanced_controlnet(controlnet):
             controlnet.verify_all_weights()
-        return (controlnet,)
+        return io.NodeOutput(controlnet,)
 
-
-class AnimaLLLiteLoaderAdvanced:
+class AnimaLLLiteLoaderAdvanced(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model_patch": (folder_paths.get_filename_list("model_patches"), ),
-            },
-            "optional": {
-                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_AnimaLLLiteLoaderAdvanced',
+            display_name='Load Anima LLLite Model 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/loaders',
+            inputs=[
+                io.Combo.Input('model_patch', options=folder_paths.get_filename_list("model_patches")),
+                io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True)
+            ],
+            outputs=[
+                io.ControlNet.Output('CONTROL_NET', is_output_list=False)
+            ]
+        )
 
-    RETURN_TYPES = ("CONTROL_NET", )
-    FUNCTION = "load_controlnet"
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/loaders"
-
-    def load_controlnet(self, model_patch, timestep_kf: TimestepKeyframeGroup=None):
+    @classmethod
+    def execute(cls, model_patch, timestep_kf: TimestepKeyframeGroup=None):
         model_patch_path = folder_paths.get_full_path_or_raise("model_patches", model_patch)
-        return (load_anima_lllite(model_patch_path, timestep_keyframe=timestep_kf),)
+        return io.NodeOutput(load_anima_lllite(model_patch_path, timestep_keyframe=timestep_kf),)
 
-
-class AdvancedControlNetApply:
+class AdvancedControlNetApply(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "positive": ("CONDITIONING", ),
-                "negative": ("CONDITIONING", ),
-                "control_net": ("CONTROL_NET", ),
-                "image": ("IMAGE", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
-            },
-            "optional": {
-                "mask_optional": ("MASK", ),
-                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
-                "latent_kf_override": ("LATENT_KEYFRAME", ),
-                "weights_override": ("CONTROL_NET_WEIGHTS", ),
-                "vae_optional": ("VAE",),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_AdvancedControlNetApply_v2',
+            display_name='Apply Advanced ControlNet 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝',
+            inputs=[
+                io.Conditioning.Input('positive'),
+                io.Conditioning.Input('negative'),
+                io.ControlNet.Input('control_net'),
+                io.Image.Input('image'),
+                io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
+                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
+                io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
+                io.Mask.Input('mask_optional', optional=True),
+                io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
+                io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
+                io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True),
+                io.Vae.Input('vae_optional', optional=True)
+            ],
+            outputs=[
+                io.Conditioning.Output('positive', is_output_list=False),
+                io.Conditioning.Output('negative', is_output_list=False)
+            ]
+        )
 
-    RETURN_TYPES = ("CONDITIONING","CONDITIONING",)
-    RETURN_NAMES = ("positive", "negative")
-    FUNCTION = "apply_controlnet"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
-
-    def apply_controlnet(self, positive, negative, control_net, image, strength, start_percent, end_percent,
+    @classmethod
+    def execute(cls, positive, negative, control_net, image, strength, start_percent, end_percent,
                          mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None, control_apply_to_uncond=False):
         if strength == 0:
-            return (positive, negative)
+            return io.NodeOutput(positive, negative)
 
         control_hint = image.movedim(-1,1)
         cnets = {}
@@ -183,43 +180,43 @@ class AdvancedControlNetApply:
                     n = [t[0], d]
                     c.append(n)
             out.append(c)
-        return (out[0], out[1])
+        return io.NodeOutput(out[0], out[1])
     
 
-class AdvancedControlNetApplySingle:
+class AdvancedControlNetApplySingle(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "conditioning": ("CONDITIONING", ),
-                "control_net": ("CONTROL_NET", ),
-                "image": ("IMAGE", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
-            },
-            "optional": {
-                "mask_optional": ("MASK", ),
-                "timestep_kf": ("TIMESTEP_KEYFRAME", ),
-                "latent_kf_override": ("LATENT_KEYFRAME", ),
-                "weights_override": ("CONTROL_NET_WEIGHTS", ),
-                "vae_optional": ("VAE",),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_AdvancedControlNetApplySingle_v2',
+            display_name='Apply Advanced ControlNet(1) 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝',
+            inputs=[
+                io.Conditioning.Input('conditioning'),
+                io.ControlNet.Input('control_net'),
+                io.Image.Input('image'),
+                io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
+                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
+                io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
+                io.Mask.Input('mask_optional', optional=True),
+                io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
+                io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
+                io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True),
+                io.Vae.Input('vae_optional', optional=True)
+            ],
+            outputs=[
+                io.Conditioning.Output('CONDITIONING', is_output_list=False),
+                io.Model.Output('model_opt', is_output_list=False)
+            ]
+        )
 
-    RETURN_TYPES = ("CONDITIONING","MODEL",)
-    RETURN_NAMES = ("CONDITIONING", "model_opt")
-    FUNCTION = "apply_controlnet"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝"
-
-    def apply_controlnet(self, conditioning, control_net, image, strength, start_percent, end_percent,
+    @classmethod
+    def execute(cls, conditioning, control_net, image, strength, start_percent, end_percent,
                          mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
                          weights_override: ControlWeights=None):
-        values = AdvancedControlNetApply.apply_controlnet(self, positive=conditioning, negative=None, control_net=control_net, image=image,
+        values = AdvancedControlNetApply.execute(positive=conditioning, negative=None, control_net=control_net, image=image,
                                                           strength=strength, start_percent=start_percent, end_percent=end_percent,
                                                           mask_optional=mask_optional, vae_optional=vae_optional,
                                                           timestep_kf=timestep_kf, latent_kf_override=latent_kf_override, weights_override=weights_override,
                                                           control_apply_to_uncond=True)
-        return (values[0],)
+        return io.NodeOutput(values.args[0], None)

@@ -1,3 +1,4 @@
+from comfy_api.latest import io
 from torch import Tensor
 
 import folder_paths
@@ -7,68 +8,68 @@ from comfy.sd import VAE
 
 from .utils import TimestepKeyframeGroup
 from .control_sparsectrl import SparseMethod, SparseIndexMethod, SparseSettings, SparseSpreadMethod, PreprocSparseRGBWrapper, SparseConst, SparseContextAware, get_idx_list_from_str
-from .control import load_sparsectrl, load_controlnet, ControlNetAdvanced, SparseCtrlAdvanced
-
+from .control import load_sparsectrl, load_controlnet, ControlNetAdvanced
 
 # node for SparseCtrl loading
-class SparseCtrlLoaderAdvanced:
+class SparseCtrlLoaderAdvanced(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "sparsectrl_name": (folder_paths.get_filename_list("controlnet"), ),
-                "use_motion": ("BOOLEAN", {"default": True}, ),
-                "motion_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "motion_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-            },
-            "optional": {
-                "sparse_method": ("SPARSE_METHOD", ),
-                "tk_optional": ("TIMESTEP_KEYFRAME", ),
-                "context_aware": (SparseContextAware.LIST, ),
-                "sparse_hint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "sparse_nonhint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "sparse_mask_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_SparseCtrlLoaderAdvanced',
+            display_name='Load SparseCtrl Model 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl',
+            inputs=[
+                io.Combo.Input('sparsectrl_name', options=folder_paths.get_filename_list("controlnet")),
+                io.Boolean.Input('use_motion', default=True),
+                io.Float.Input('motion_strength', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('motion_scale', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Custom('SPARSE_METHOD').Input('sparse_method', optional=True),
+                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', optional=True),
+                io.Combo.Input('context_aware', optional=True, options=['nearest_hint', 'off']),
+                io.Float.Input('sparse_hint_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('sparse_nonhint_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('sparse_mask_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001)
+            ],
+            outputs=[
+                io.ControlNet.Output('CONTROL_NET', is_output_list=False)
+            ]
+        )
     
-    RETURN_TYPES = ("CONTROL_NET", )
-    FUNCTION = "load_controlnet"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
-
-    def load_controlnet(self, sparsectrl_name: str, use_motion: bool, motion_strength: float, motion_scale: float, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None,
+    @classmethod
+    def execute(cls, sparsectrl_name: str, use_motion: bool, motion_strength: float, motion_scale: float, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None,
                         context_aware=SparseContextAware.NEAREST_HINT, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, sparse_mask_mult=1.0):
         sparsectrl_path = folder_paths.get_full_path("controlnet", sparsectrl_name)
         sparse_settings = SparseSettings(sparse_method=sparse_method, use_motion=use_motion, motion_strength=motion_strength, motion_scale=motion_scale,
                                          context_aware=context_aware,
                                          sparse_mask_mult=sparse_mask_mult, sparse_hint_mult=sparse_hint_mult, sparse_nonhint_mult=sparse_nonhint_mult)
         sparsectrl = load_sparsectrl(sparsectrl_path, timestep_keyframe=tk_optional, sparse_settings=sparse_settings)
-        return (sparsectrl,)
+        return io.NodeOutput(sparsectrl,)
 
-
-class SparseCtrlMergedLoaderAdvanced:
+class SparseCtrlMergedLoaderAdvanced(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "sparsectrl_name": (folder_paths.get_filename_list("controlnet"), ),
-                "control_net_name": (folder_paths.get_filename_list("controlnet"), ),
-                "use_motion": ("BOOLEAN", {"default": True}, ),
-                "motion_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "motion_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-            },
-            "optional": {
-                "sparse_method": ("SPARSE_METHOD", ),
-                "tk_optional": ("TIMESTEP_KEYFRAME", ),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_SparseCtrlMergedLoaderAdvanced',
+            display_name='🧪Load Merged SparseCtrl Model 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/experimental',
+            inputs=[
+                io.Combo.Input('sparsectrl_name', options=folder_paths.get_filename_list("controlnet")),
+                io.Combo.Input('control_net_name', options=folder_paths.get_filename_list("controlnet")),
+                io.Boolean.Input('use_motion', default=True),
+                io.Float.Input('motion_strength', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('motion_scale', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Custom('SPARSE_METHOD').Input('sparse_method', optional=True),
+                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', optional=True)
+            ],
+            outputs=[
+                io.ControlNet.Output('CONTROL_NET', is_output_list=False)
+            ]
+        )
     
-    RETURN_TYPES = ("CONTROL_NET", )
-    FUNCTION = "load_controlnet"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/experimental"
-
-    def load_controlnet(self, sparsectrl_name: str, control_net_name: str, use_motion: bool, motion_strength: float, motion_scale: float, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None):
+    @classmethod
+    def execute(cls, sparsectrl_name: str, control_net_name: str, use_motion: bool, motion_strength: float, motion_scale: float, sparse_method: SparseMethod=SparseSpreadMethod(), tk_optional: TimestepKeyframeGroup=None):
         sparsectrl_path = folder_paths.get_full_path("controlnet", sparsectrl_name)
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         sparse_settings = SparseSettings(sparse_method=sparse_method, use_motion=use_motion, motion_strength=motion_strength, motion_scale=motion_scale, merged=True)
@@ -85,64 +86,68 @@ class SparseCtrlMergedLoaderAdvanced:
             new_state_dict[key] = value
         # now, reload sparsectrl with real settings
         sparsectrl = load_sparsectrl(sparsectrl_path, controlnet_data=new_state_dict, timestep_keyframe=tk_optional, sparse_settings=sparse_settings)
-        return (sparsectrl,)
+        return io.NodeOutput(sparsectrl,)
 
-
-class SparseIndexMethodNode:
+class SparseIndexMethodNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "indexes": ("STRING", {"default": "0"}),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_SparseCtrlIndexMethodNode',
+            display_name='SparseCtrl Index Method 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl',
+            inputs=[
+                io.String.Input('indexes', default='0')
+            ],
+            outputs=[
+                io.Custom('SPARSE_METHOD').Output('SPARSE_METHOD', is_output_list=False)
+            ]
+        )
     
-    RETURN_TYPES = ("SPARSE_METHOD",)
-    FUNCTION = "get_method"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
-
-    def get_method(self, indexes: str):
+    @classmethod
+    def execute(cls, indexes: str):
         idxs = get_idx_list_from_str(indexes)
-        return (SparseIndexMethod(idxs),)
+        return io.NodeOutput(SparseIndexMethod(idxs),)
 
-
-class SparseSpreadMethodNode:
+class SparseSpreadMethodNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "spread": (SparseSpreadMethod.LIST,),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_SparseCtrlSpreadMethodNode',
+            display_name='SparseCtrl Spread Method 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl',
+            inputs=[
+                io.Combo.Input('spread', options=['uniform', 'starting', 'ending', 'center'])
+            ],
+            outputs=[
+                io.Custom('SPARSE_METHOD').Output('SPARSE_METHOD', is_output_list=False)
+            ]
+        )
     
-    RETURN_TYPES = ("SPARSE_METHOD",)
-    FUNCTION = "get_method"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl"
-
-    def get_method(self, spread: str):
-        return (SparseSpreadMethod(spread=spread),)
-
-
-class RgbSparseCtrlPreprocessor:
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "image": ("IMAGE", ),
-                "vae": ("VAE", ),
-                "latent_size": ("LATENT", ),
-            },
-        }
+    def execute(cls, spread: str):
+        return io.NodeOutput(SparseSpreadMethod(spread=spread),)
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("proc_IMAGE",)
-    FUNCTION = "preprocess_images"
+class RgbSparseCtrlPreprocessor(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_SparseCtrlRGBPreprocessor',
+            display_name='RGB SparseCtrl 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/preprocess',
+            inputs=[
+                io.Image.Input('image'),
+                io.Vae.Input('vae'),
+                io.Latent.Input('latent_size')
+            ],
+            outputs=[
+                io.Image.Output('proc_IMAGE', is_output_list=False)
+            ]
+        )
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/preprocess"
-
-    def preprocess_images(self, vae: VAE, image: Tensor, latent_size: Tensor):
+    @classmethod
+    def execute(cls, vae: VAE, image: Tensor, latent_size: Tensor):
         # first, resize image to match latents
         image = image.movedim(-1,1)
         image = comfy.utils.common_upscale(image, latent_size["samples"].shape[3] * 8, latent_size["samples"].shape[2] * 8, 'nearest-exact', "center")
@@ -153,30 +158,31 @@ class RgbSparseCtrlPreprocessor:
         except Exception:
             image = VAEEncode.vae_encode_crop_pixels(image)
         encoded = vae.encode(image[:,:,:,:3])
-        return (PreprocSparseRGBWrapper(condhint=encoded),)
+        return io.NodeOutput(PreprocSparseRGBWrapper(condhint=encoded),)
 
-
-class SparseWeightExtras:
+class SparseWeightExtras(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "optional": {
-                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-                "sparse_hint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "sparse_nonhint_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "sparse_mask_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_SparseCtrlWeightExtras',
+            display_name='SparseCtrl Weight Extras 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/extras',
+            inputs=[
+                io.Custom('CN_WEIGHTS_EXTRAS').Input('cn_extras', optional=True),
+                io.Float.Input('sparse_hint_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('sparse_nonhint_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('sparse_mask_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001)
+            ],
+            outputs=[
+                io.Custom('CN_WEIGHTS_EXTRAS').Output('cn_extras', is_output_list=False)
+            ]
+        )
     
-    RETURN_TYPES = ("CN_WEIGHTS_EXTRAS", )
-    RETURN_NAMES = ("cn_extras", )
-    FUNCTION = "create_weight_extras"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/SparseCtrl/extras"
-
-    def create_weight_extras(self, cn_extras: dict[str]={}, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, sparse_mask_mult=1.0):
+    @classmethod
+    def execute(cls, cn_extras: dict[str]={}, sparse_hint_mult=1.0, sparse_nonhint_mult=1.0, sparse_mask_mult=1.0):
         cn_extras = cn_extras.copy()
         cn_extras[SparseConst.HINT_MULT] = sparse_hint_mult
         cn_extras[SparseConst.NONHINT_MULT] = sparse_nonhint_mult
         cn_extras[SparseConst.MASK_MULT] = sparse_mask_mult
-        return (cn_extras, )
+        return io.NodeOutput(cn_extras, )
