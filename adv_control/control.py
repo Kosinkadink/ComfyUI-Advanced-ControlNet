@@ -813,7 +813,7 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
 
     if controlnet_config is None:
         unet_dtype = comfy.model_management.unet_dtype()
-        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, unet_dtype, True).unet_config
+        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, use_base_if_no_match=True).unet_config
     load_device = comfy.model_management.get_torch_device()
     manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
     if manual_cast_dtype is not None:
@@ -953,7 +953,7 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
 
     if controlnet_config is None:
         unet_dtype = comfy.model_management.unet_dtype()
-        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, unet_dtype, True).unet_config
+        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, use_base_if_no_match=True).unet_config
     load_device = comfy.model_management.get_torch_device()
     manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
     if manual_cast_dtype is not None:

@@ -773,6 +773,9 @@ def refcn_diffusion_model_wrapper_factory(reference_injections: ReferenceInjecti
         # if nothing related to reference controlnets, do nothing special
         if len(ref_controlnets) == 0 and len(context_controlnets) == 0:
             return executor(x, *args, **kwargs)
+        adain_controlnets = []
+        context_adain_controlnets = []
+        orig_forward_timestep_embed = None
         try:
             # assign cond and uncond idxs
             batched_number = len(transformer_options["cond_or_uncond"])
@@ -784,14 +787,12 @@ def refcn_diffusion_model_wrapper_factory(reference_injections: ReferenceInjecti
             transformer_options[REF_COND_IDXS] = [i for i, z in enumerate(indiv_conds) if z == 0]
             # check which controlnets do which thing
             attn_controlnets = []
-            adain_controlnets = []
             for control in ref_controlnets:
                 if ReferenceType.is_attn(control.ref_opts.reference_type):
                     attn_controlnets.append(control)
                 if ReferenceType.is_adain(control.ref_opts.reference_type):
                     adain_controlnets.append(control)
             context_attn_controlnets = []
-            context_adain_controlnets = []
             # for ease of access, store current contextref_cond_idx value
             if len(context_controlnets) == 0:
                 transformer_options[CONTEXTREF_TEMP_COND_IDX] = -1
@@ -877,7 +878,7 @@ def refcn_diffusion_model_wrapper_factory(reference_injections: ReferenceInjecti
         finally:
             # make sure ref banks are cleared no matter what happens - otherwise, RIP VRAM
             reference_injections.clean_ref_module_mem()
-            if len(adain_controlnets) > 0 or len(context_adain_controlnets) > 0:
+            if orig_forward_timestep_embed is not None:
                 openaimodel.forward_timestep_embed = orig_forward_timestep_embed
     return refcn_diffusion_model_wrapper
 
