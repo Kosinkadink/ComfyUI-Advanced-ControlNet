@@ -233,7 +233,7 @@ class LLLiteModule(torch.nn.Module):
                 mask = prepare_mask_batch(control.mask_cond_hint, (1, 1, h, w)).to(cx.dtype)
                 mask = mask.view(mask.shape[0], 1, h * w).permute(0, 2, 1)
             if control.tk_mask_cond_hint is not None:
-                mask_tk = prepare_mask_batch(control.mask_cond_hint, (1, 1, h, w)).to(cx.dtype)
+                mask_tk = prepare_mask_batch(control.tk_mask_cond_hint, (1, 1, h, w)).to(cx.dtype)
                 mask_tk = mask_tk.view(mask_tk.shape[0], 1, h * w).permute(0, 2, 1)
 
         # x in uncond/cond doubles batch size
@@ -250,7 +250,7 @@ class LLLiteModule(torch.nn.Module):
 
         if mask is None:
             mask = 1.0
-        elif mask_tk is not None:
+        if mask_tk is not None:
             mask = mask * mask_tk
 
         #logger.info(f"cs: {cx.shape}, x: {x.shape}, is_conv2d: {self.is_conv2d}")
@@ -260,7 +260,7 @@ class LLLiteModule(torch.nn.Module):
         if control.latent_keyframes is not None:
             cx = cx * control.calc_latent_keyframe_mults(x=cx, batched_number=control.batched_number)
         if control.weights is not None and control.weights.has_uncond_multiplier:
-            cond_or_uncond = control.batched_number.cond_or_uncond
+            cond_or_uncond = control.cond_or_uncond
             actual_length = cx.size(0) // control.batched_number
             for idx, cond_type in enumerate(cond_or_uncond):
                 # if uncond, set to weight's uncond_multiplier
