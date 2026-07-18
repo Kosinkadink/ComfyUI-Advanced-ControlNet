@@ -216,7 +216,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
                 del self.cond_hint
                 self.cond_hint = None
                 if full_cond_hint_original.size(0) < self.full_latent_length:
-                    actual_cond_hint_orig = extend_to_batch_size(tensor=full_cond_hint_original, batch_size=full_cond_hint_original.size(0))
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=full_cond_hint_original, batch_size=self.full_latent_length)
                 self.cond_hint_original = actual_cond_hint_orig[self.sub_idxs]
             # mask hints
             self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)
@@ -810,7 +810,7 @@ def load_sparsectrl(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, tim
 
     if controlnet_config is None:
         unet_dtype = comfy.model_management.unet_dtype()
-        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, unet_dtype, True).unet_config
+        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, use_base_if_no_match=True).unet_config
     load_device = comfy.model_management.get_torch_device()
     manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
     if manual_cast_dtype is not None:
@@ -950,7 +950,7 @@ def load_svdcontrolnet(ckpt_path: str, controlnet_data: dict[str, Tensor]=None, 
 
     if controlnet_config is None:
         unet_dtype = comfy.model_management.unet_dtype()
-        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, unet_dtype, True).unet_config
+        controlnet_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, use_base_if_no_match=True).unet_config
     load_device = comfy.model_management.get_torch_device()
     manual_cast_dtype = comfy.model_management.unet_manual_cast(unet_dtype, load_device)
     if manual_cast_dtype is not None:
