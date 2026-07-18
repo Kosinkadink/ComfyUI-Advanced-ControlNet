@@ -2,6 +2,7 @@ from comfy_api.latest import io
 from torch import Tensor
 
 import folder_paths
+import comfy.utils
 
 from .control import load_controlnet, convert_to_advanced, is_advanced_controlnet, is_sd3_advanced_controlnet
 from .control_lllite import load_anima_lllite
@@ -112,9 +113,11 @@ class AdvancedControlNetApply(io.ComfyNode):
     def execute(cls, positive, negative, control_net, image, strength, start_percent, end_percent,
                          mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
-                         weights_override: ControlWeights=None, control_apply_to_uncond=False):
-        if strength == 0:
+                         weights_override: ControlWeights=None, control_apply_to_uncond=False, extra_concat=None):
+        if strength == 0 or (mask_optional is not None and mask_optional.count_nonzero().item() == 0):
             return io.NodeOutput(positive, negative)
+        if extra_concat is None:
+            extra_concat = []
 
         control_hint = image.movedim(-1,1)
         cnets = {}
@@ -134,7 +137,7 @@ class AdvancedControlNetApply(io.ComfyNode):
                         if control_net is None:
                             raise Exception("Passed in control_net is None; something must have went wrong when loading it from a Load ControlNet node.")
                         # copy, convert to advanced if needed, and set cond
-                        c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent), vae_optional)
+                        c_net = convert_to_advanced(control_net.copy()).set_cond_hint(control_hint, strength, (start_percent, end_percent), vae_optional, extra_concat)
                         if is_advanced_controlnet(c_net):
                             # disarm node check
                             c_net.disarm()
@@ -182,6 +185,62 @@ class AdvancedControlNetApply(io.ComfyNode):
             out.append(c)
         return io.NodeOutput(out[0], out[1])
     
+
+class AdvancedControlNetInpaintingApply(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_AdvancedControlNetInpaintingApply',
+            display_name='Apply Advanced ControlNet Inpainting 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝',
+            inputs=[
+                io.Conditioning.Input('positive'),
+                io.Conditioning.Input('negative'),
+                io.ControlNet.Input('control_net'),
+                io.Vae.Input('vae'),
+                io.Image.Input('image'),
+                io.Mask.Input('inpaint_mask'),
+                io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
+                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
+                io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
+                io.Mask.Input('effect_mask_optional', optional=True),
+                io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
+                io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
+                io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True)
+            ],
+            outputs=[
+                io.Conditioning.Output('positive', is_output_list=False),
+                io.Conditioning.Output('negative', is_output_list=False)
+            ]
+        )
+
+    @classmethod
+    def execute(cls, positive, negative, control_net, vae, image, inpaint_mask, strength, start_percent, end_percent,
+                effect_mask_optional: Tensor=None, timestep_kf: TimestepKeyframeGroup=None,
+                latent_kf_override: LatentKeyframeGroup=None, weights_override: ControlWeights=None):
+        if not getattr(control_net, "concat_mask", False):
+            raise ValueError("The provided ControlNet does not use an inpaint source mask; use Apply Advanced ControlNet instead.")
+
+        source_mask = 1.0 - inpaint_mask.reshape((-1, 1, inpaint_mask.shape[-2], inpaint_mask.shape[-1]))
+        mask_apply = comfy.utils.common_upscale(source_mask, image.shape[2], image.shape[1], "bilinear", "center").round()
+        image = image * mask_apply.movedim(1, -1).repeat(1, 1, 1, image.shape[3])
+
+        return AdvancedControlNetApply.execute(
+            positive=positive,
+            negative=negative,
+            control_net=control_net,
+            image=image,
+            strength=strength,
+            start_percent=start_percent,
+            end_percent=end_percent,
+            mask_optional=effect_mask_optional,
+            vae_optional=vae,
+            timestep_kf=timestep_kf,
+            latent_kf_override=latent_kf_override,
+            weights_override=weights_override,
+            extra_concat=[source_mask]
+        )
+
 
 class AdvancedControlNetApplySingle(io.ComfyNode):
     @classmethod
