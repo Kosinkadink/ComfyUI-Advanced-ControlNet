@@ -219,7 +219,7 @@ class T2IAdapterAdvanced(T2IAdapter, AdvancedControlBase):
                 del self.cond_hint
                 self.cond_hint = None
                 if full_cond_hint_original.size(0) < self.full_latent_length:
-                    actual_cond_hint_orig = extend_to_batch_size(tensor=full_cond_hint_original, batch_size=full_cond_hint_original.size(0))
+                    actual_cond_hint_orig = extend_to_batch_size(tensor=full_cond_hint_original, batch_size=self.full_latent_length)
                 self.cond_hint_original = actual_cond_hint_orig[self.sub_idxs]
             # mask hints
             self.prepare_mask_cond_hint(x_noisy=x_noisy, t=t, cond=cond, batched_number=batched_number)

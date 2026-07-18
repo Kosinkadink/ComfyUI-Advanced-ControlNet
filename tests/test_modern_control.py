@@ -10,8 +10,11 @@ if comfyui_path:
 
 import torch
 
-from adv_control.control import ControlNetAdvanced
+from comfy.controlnet import T2IAdapter
+
+from adv_control.control import ControlNetAdvanced, T2IAdapterAdvanced
 from adv_control.nodes_main import AdvancedControlNetApply, AdvancedControlNetInpaintingApply
+from adv_control.utils import ControlWeights
 
 
 class StopControlModel(Exception):
@@ -101,6 +104,56 @@ class ModernControlPreprocessingTests(unittest.TestCase):
 
         self.assertEqual(tuple(vae.encoded_shape), (1, 16, 16, 3))
         self.assertEqual(tuple(control_model.hint.shape), (1, 5, 2, 2, 2))
+
+
+class T2IAdapterTests(unittest.TestCase):
+    def test_effect_masks_are_applied_to_adapter_features(self):
+        control = T2IAdapterAdvanced(SimpleNamespace(), None, channels_in=3)
+        control.weights = ControlWeights.t2iadapter()
+        control.latent_keyframes = None
+        control.tk_mask_cond_hint = None
+        control._current_timestep_keyframe = SimpleNamespace(strength=1.0)
+
+        masks = {
+            "zero": torch.zeros((1, 1, 8, 8)),
+            "one": torch.ones((1, 1, 8, 8)),
+            "half": torch.cat((torch.zeros((1, 1, 8, 4)), torch.ones((1, 1, 8, 4))), dim=3),
+        }
+        for name, mask in masks.items():
+            with self.subTest(name=name):
+                features = torch.ones((1, 4, 8, 8))
+                control.mask_cond_hint = mask
+                control.apply_advanced_strengths_and_masks(features, batched_number=1)
+                torch.testing.assert_close(features, mask.expand_as(features))
+
+    def test_sliding_context_extends_single_hint_to_full_latent_length(self):
+        control = T2IAdapterAdvanced(SimpleNamespace(), None, channels_in=3)
+        original_hint = torch.ones((1, 3, 8, 8))
+        control.cond_hint_original = original_hint
+        control.cond_hint = None
+        control.sub_idxs = [2, 3]
+        control.full_latent_length = 4
+        control.prepare_mask_cond_hint = lambda **kwargs: None
+        selected_hint = None
+
+        def get_control(adapter, *args, **kwargs):
+            nonlocal selected_hint
+            selected_hint = adapter.cond_hint_original.clone()
+            return sentinel.output
+
+        with patch.object(T2IAdapter, "get_control", get_control):
+            result = control.get_control_advanced(
+                torch.ones((2, 4, 8, 8)),
+                torch.ones(2),
+                {},
+                1,
+                {},
+            )
+
+        self.assertIs(result, sentinel.output)
+        self.assertEqual(tuple(selected_hint.shape), (2, 3, 8, 8))
+        torch.testing.assert_close(selected_hint, original_hint.repeat(2, 1, 1, 1))
+        self.assertIs(control.cond_hint_original, original_hint)
 
 
 class AdvancedInpaintingApplyTests(unittest.TestCase):
