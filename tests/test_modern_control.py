@@ -63,6 +63,20 @@ class ModernControlPreprocessingTests(unittest.TestCase):
         )
         torch.testing.assert_close(output, expected)
 
+    def test_effect_mask_matches_padded_flux_tokens_for_odd_latent_size(self):
+        control = ControlNetAdvanced(ControlModel(), None)
+        control.x_noisy_shape = (1, 16, 5, 7)
+        control.mask_cond_hint = torch.ones((1, 1, 5, 7))
+        control.tk_mask_cond_hint = None
+        control.weights = SimpleNamespace(has_uncond_multiplier=False, has_uncond_mask=False)
+        control.latent_keyframes = None
+        control._current_timestep_keyframe = SimpleNamespace(strength=1.0)
+
+        output = torch.ones((1, 12, 4))
+        control.apply_advanced_strengths_and_masks(output, batched_number=1)
+
+        torch.testing.assert_close(output, torch.ones_like(output))
+
     def test_vae_compression_and_source_mask_match_5d_hint(self):
         control_model = ControlModel()
         vae = VideoVAE()
