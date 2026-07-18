@@ -1,40 +1,40 @@
+from comfy_api.latest import io
 from typing import Union
 import numpy as np
 from collections.abc import Iterable
 
-from .utils import ControlWeights, TimestepKeyframe, TimestepKeyframeGroup, LatentKeyframe, LatentKeyframeGroup, BIGMIN, BIGMAX
+from .utils import ControlWeights, TimestepKeyframe, TimestepKeyframeGroup, LatentKeyframe, LatentKeyframeGroup
 from .utils import StrengthInterpolation as SI
 from .logger import logger
 
-
-class TimestepKeyframeNode:
+class TimestepKeyframeNode(io.ComfyNode):
     OUTDATED_DUMMY = -39
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}, ),
-            },
-            "optional": {
-                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
-                "latent_keyframe": ("LATENT_KEYFRAME", ),
-                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "inherit_missing": ("BOOLEAN", {"default": True}, ),
-                "guarantee_steps": ("INT", {"default": 1, "min": 0, "max": BIGMAX}),
-                "mask_optional": ("MASK", ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='TimestepKeyframe',
+            display_name='Timestep Keyframe 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
+                io.Custom('TIMESTEP_KEYFRAME').Input('prev_timestep_kf', optional=True),
+                io.Float.Input('strength', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Custom('CONTROL_NET_WEIGHTS').Input('cn_weights', optional=True),
+                io.Custom('LATENT_KEYFRAME').Input('latent_keyframe', optional=True),
+                io.Float.Input('null_latent_kf_strength', optional=True, default=0.0, max=10.0, min=0.0, step=0.001),
+                io.Boolean.Input('inherit_missing', optional=True, default=True),
+                io.Int.Input('guarantee_steps', optional=True, default=1, max=9007199254740991, min=0),
+                io.Mask.Input('mask_optional', optional=True)
+            ],
+            outputs=[
+                io.Custom('TIMESTEP_KEYFRAME').Output('TIMESTEP_KF', is_output_list=False)
+            ]
+        )
     
-    RETURN_NAMES = ("TIMESTEP_KF", )
-    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframe"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
+    @classmethod
+    def execute(cls,
                       start_percent: float,
                       strength: float=1.0,
                       cn_weights: ControlWeights=None, control_net_weights: ControlWeights=None, # old name
@@ -46,7 +46,7 @@ class TimestepKeyframeNode:
                       guarantee_usage=True, # old input
                       mask_optional=None,):
         # if using outdated dummy value, means node on workflow is outdated and should appropriately convert behavior
-        if guarantee_steps == self.OUTDATED_DUMMY:
+        if guarantee_steps == cls.OUTDATED_DUMMY:
             guarantee_steps = int(guarantee_usage)
         control_net_weights = control_net_weights if control_net_weights else cn_weights
         prev_timestep_keyframe = prev_timestep_keyframe if prev_timestep_keyframe else prev_timestep_kf
@@ -58,39 +58,39 @@ class TimestepKeyframeNode:
                                     control_weights=control_net_weights, latent_keyframes=latent_keyframe, inherit_missing=inherit_missing,
                                     guarantee_steps=guarantee_steps, mask_hint_orig=mask_optional)
         prev_timestep_keyframe.add(keyframe)
-        return (prev_timestep_keyframe,)
+        return io.NodeOutput(prev_timestep_keyframe,)
     
 
-class TimestepKeyframeInterpolationNode:
+class TimestepKeyframeInterpolationNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001},),
-                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-                "strength_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001},),
-                "strength_end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001},),
-                "interpolation": (SI._LIST, ),
-                "intervals": ("INT", {"default": 50, "min": 2, "max": 100, "step": 1}),
-            },
-            "optional": {
-                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
-                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
-                "latent_keyframe": ("LATENT_KEYFRAME", ),
-                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001},),
-                "inherit_missing": ("BOOLEAN", {"default": True},),
-                "mask_optional": ("MASK", ),
-                "print_keyframes": ("BOOLEAN", {"default": False}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_TimestepKeyframeInterpolation',
+            display_name='Timestep Keyframe Interp. 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
+                io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
+                io.Float.Input('strength_start', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('strength_end', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Combo.Input('interpolation', options=['linear', 'ease-in', 'ease-out', 'ease-in-out']),
+                io.Int.Input('intervals', default=50, max=100, min=2, step=1),
+                io.Custom('TIMESTEP_KEYFRAME').Input('prev_timestep_kf', optional=True),
+                io.Custom('CONTROL_NET_WEIGHTS').Input('cn_weights', optional=True),
+                io.Custom('LATENT_KEYFRAME').Input('latent_keyframe', optional=True),
+                io.Float.Input('null_latent_kf_strength', optional=True, default=0.0, max=10.0, min=0.0, step=0.001),
+                io.Boolean.Input('inherit_missing', optional=True, default=True),
+                io.Mask.Input('mask_optional', optional=True),
+                io.Boolean.Input('print_keyframes', optional=True, default=False)
+            ],
+            outputs=[
+                io.Custom('TIMESTEP_KEYFRAME').Output('TIMESTEP_KF', is_output_list=False)
+            ]
+        )
     
-    RETURN_NAMES = ("TIMESTEP_KF", )
-    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframe"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
+    @classmethod
+    def execute(cls,
                       start_percent: float, end_percent: float,
                       strength_start: float, strength_end: float, interpolation: str, intervals: int,
                       cn_weights: ControlWeights=None,
@@ -119,36 +119,35 @@ class TimestepKeyframeInterpolationNode:
                                     guarantee_steps=guarantee_steps, mask_hint_orig=mask_optional))
             if print_keyframes:
                 logger.info(f"TimestepKeyframe - start_percent:{percent} = {strength}")
-        return (prev_timestep_kf,)
+        return io.NodeOutput(prev_timestep_kf,)
 
-
-class TimestepKeyframeFromStrengthListNode:
+class TimestepKeyframeFromStrengthListNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "float_strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.001, "forceInput": True}),
-                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001},),
-                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-            },
-            "optional": {
-                "prev_timestep_kf": ("TIMESTEP_KEYFRAME", ),
-                "cn_weights": ("CONTROL_NET_WEIGHTS", ),
-                "latent_keyframe": ("LATENT_KEYFRAME", ),
-                "null_latent_kf_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001},),
-                "inherit_missing": ("BOOLEAN", {"default": True},),
-                "mask_optional": ("MASK", ),
-                "print_keyframes": ("BOOLEAN", {"default": False}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='ACN_TimestepKeyframeFromStrengthList',
+            display_name='Timestep Keyframe From List 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.Float.Input('float_strengths', default=-1, force_input=True, min=-1, step=0.001),
+                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
+                io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
+                io.Custom('TIMESTEP_KEYFRAME').Input('prev_timestep_kf', optional=True),
+                io.Custom('CONTROL_NET_WEIGHTS').Input('cn_weights', optional=True),
+                io.Custom('LATENT_KEYFRAME').Input('latent_keyframe', optional=True),
+                io.Float.Input('null_latent_kf_strength', optional=True, default=0.0, max=10.0, min=0.0, step=0.001),
+                io.Boolean.Input('inherit_missing', optional=True, default=True),
+                io.Mask.Input('mask_optional', optional=True),
+                io.Boolean.Input('print_keyframes', optional=True, default=False)
+            ],
+            outputs=[
+                io.Custom('TIMESTEP_KEYFRAME').Output('TIMESTEP_KF', is_output_list=False)
+            ]
+        )
     
-    RETURN_NAMES = ("TIMESTEP_KF", )
-    RETURN_TYPES = ("TIMESTEP_KEYFRAME", )
-    FUNCTION = "load_keyframe"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
+    @classmethod
+    def execute(cls,
                       start_percent: float, end_percent: float,
                       float_strengths: float,
                       cn_weights: ControlWeights=None,
@@ -182,29 +181,27 @@ class TimestepKeyframeFromStrengthListNode:
                                     guarantee_steps=guarantee_steps, mask_hint_orig=mask_optional))
             if print_keyframes:
                 logger.info(f"TimestepKeyframe - start_percent:{percent} = {strength}")
-        return (prev_timestep_kf,)
+        return io.NodeOutput(prev_timestep_kf,)
 
-
-class LatentKeyframeNode:
+class LatentKeyframeNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "batch_index": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-            },
-            "optional": {
-                "prev_latent_kf": ("LATENT_KEYFRAME", ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='LatentKeyframe',
+            display_name='Latent Keyframe 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.Int.Input('batch_index', default=0, max=9007199254740991, min=-9007199254740991, step=1),
+                io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Custom('LATENT_KEYFRAME').Input('prev_latent_kf', optional=True)
+            ],
+            outputs=[
+                io.Custom('LATENT_KEYFRAME').Output('LATENT_KF', is_output_list=False)
+            ]
+        )
 
-    RETURN_NAMES = ("LATENT_KF", )
-    RETURN_TYPES = ("LATENT_KEYFRAME", )
-    FUNCTION = "load_keyframe"
-
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
+    @classmethod
+    def execute(cls,
                       batch_index: int,
                       strength: float,
                       prev_latent_kf: LatentKeyframeGroup=None,
@@ -217,30 +214,29 @@ class LatentKeyframeNode:
             prev_latent_keyframe = prev_latent_keyframe.clone()
         keyframe = LatentKeyframe(batch_index, strength)
         prev_latent_keyframe.add(keyframe)
-        return (prev_latent_keyframe,)
+        return io.NodeOutput(prev_latent_keyframe,)
 
-
-class LatentKeyframeGroupNode:
+class LatentKeyframeGroupNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "index_strengths": ("STRING", {"multiline": True, "default": ""}),
-            },
-            "optional": {
-                "prev_latent_kf": ("LATENT_KEYFRAME", ),
-                "latent_optional": ("LATENT", ),
-                "print_keyframes": ("BOOLEAN", {"default": False}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='LatentKeyframeGroup',
+            display_name='Latent Keyframe Group 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.String.Input('index_strengths', default='', multiline=True),
+                io.Custom('LATENT_KEYFRAME').Input('prev_latent_kf', optional=True),
+                io.Latent.Input('latent_optional', optional=True),
+                io.Boolean.Input('print_keyframes', optional=True, default=False)
+            ],
+            outputs=[
+                io.Custom('LATENT_KEYFRAME').Output('LATENT_KF', is_output_list=False)
+            ]
+        )
     
-    RETURN_NAMES = ("LATENT_KF", )
-    RETURN_TYPES = ("LATENT_KEYFRAME", )
-    FUNCTION = "load_keyframes"
 
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def validate_index(self, index: int, latent_count: int = 0, is_range: bool = False, allow_negative = False) -> int:
+    @staticmethod
+    def validate_index(index: int, latent_count: int = 0, is_range: bool = False, allow_negative = False) -> int:
         # if part of range, do nothing
         if is_range:
             return index
@@ -258,13 +254,15 @@ class LatentKeyframeGroupNode:
             index = conv_index
         return index
 
-    def convert_to_index_int(self, raw_index: str, latent_count: int = 0, is_range: bool = False, allow_negative = False) -> int:
+    @classmethod
+    def convert_to_index_int(cls, raw_index: str, latent_count: int = 0, is_range: bool = False, allow_negative = False) -> int:
         try:
-            return self.validate_index(int(raw_index), latent_count=latent_count, is_range=is_range, allow_negative=allow_negative)
+            return cls.validate_index(int(raw_index), latent_count=latent_count, is_range=is_range, allow_negative=allow_negative)
         except ValueError as e:
             raise ValueError(f"index '{raw_index}' must be an integer.", e)
 
-    def convert_to_latent_keyframes(self, latent_indeces: str, latent_count: int) -> set[LatentKeyframe]:
+    @classmethod
+    def convert_to_latent_keyframes(cls, latent_indeces: str, latent_count: int) -> set[LatentKeyframe]:
         if not latent_indeces:
             return set()
         int_latent_indeces = [i for i in range(0, latent_count)]
@@ -289,8 +287,8 @@ class LatentKeyframeGroupNode:
             if ':' in g:
                 index_range = g.split(":", 1)
                 index_range = [r.strip() for r in index_range]
-                start_index = self.convert_to_index_int(index_range[0], latent_count=latent_count, is_range=True, allow_negative=allow_negative)
-                end_index = self.convert_to_index_int(index_range[1], latent_count=latent_count, is_range=True, allow_negative=allow_negative)
+                start_index = cls.convert_to_index_int(index_range[0], latent_count=latent_count, is_range=True, allow_negative=allow_negative)
+                end_index = cls.convert_to_index_int(index_range[1], latent_count=latent_count, is_range=True, allow_negative=allow_negative)
                 # if latents were passed in, base indeces on known latent count
                 if len(int_latent_indeces) > 0:
                     for i in int_latent_indeces[start_index:end_index]:
@@ -301,14 +299,16 @@ class LatentKeyframeGroupNode:
                         chosen_indeces.add(LatentKeyframe(i, strength))
             # parse individual indeces
             else:
-                chosen_indeces.add(LatentKeyframe(self.convert_to_index_int(g, latent_count=latent_count, allow_negative=allow_negative), strength))
+                chosen_indeces.add(LatentKeyframe(cls.convert_to_index_int(g, latent_count=latent_count, allow_negative=allow_negative), strength))
         return chosen_indeces
 
-    def load_keyframes(self,
+    @classmethod
+    def execute(cls,
                        index_strengths: str,
                        prev_latent_kf: LatentKeyframeGroup=None,
                        prev_latent_keyframe: LatentKeyframeGroup=None, # old name
-                       latent_image_opt=None,
+                       latent_optional=None,
+                       latent_image_opt=None, # old name
                        print_keyframes=False):
         prev_latent_keyframe = prev_latent_keyframe if prev_latent_keyframe else prev_latent_kf
         if not prev_latent_keyframe:
@@ -317,10 +317,11 @@ class LatentKeyframeGroupNode:
             prev_latent_keyframe = prev_latent_keyframe.clone()
         curr_latent_keyframe = LatentKeyframeGroup()
 
+        latent_image_opt = latent_image_opt if latent_image_opt is not None else latent_optional
         latent_count = -1
         if latent_image_opt:
             latent_count = latent_image_opt['samples'].size()[0]
-        latent_keyframes = self.convert_to_latent_keyframes(index_strengths, latent_count=latent_count)
+        latent_keyframes = cls.convert_to_latent_keyframes(index_strengths, latent_count=latent_count)
 
         for latent_keyframe in latent_keyframes:
             curr_latent_keyframe.add(latent_keyframe)
@@ -333,32 +334,32 @@ class LatentKeyframeGroupNode:
         for latent_keyframe in prev_latent_keyframe.keyframes:
             curr_latent_keyframe.add(latent_keyframe)
 
-        return (curr_latent_keyframe,)
+        return io.NodeOutput(curr_latent_keyframe,)
 
         
-class LatentKeyframeInterpolationNode:
+class LatentKeyframeInterpolationNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "batch_index_from": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
-                "batch_index_to_excl": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX, "step": 1}),
-                "strength_from": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "strength_to": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}, ),
-                "interpolation": (SI._LIST, ),
-            },
-            "optional": {
-                "prev_latent_kf": ("LATENT_KEYFRAME", ),
-                "print_keyframes": ("BOOLEAN", {"default": False}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='LatentKeyframeTiming',
+            display_name='Latent Keyframe Interp. 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.Int.Input('batch_index_from', default=0, max=9007199254740991, min=-9007199254740991, step=1),
+                io.Int.Input('batch_index_to_excl', default=0, max=9007199254740991, min=-9007199254740991, step=1),
+                io.Float.Input('strength_from', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Float.Input('strength_to', default=1.0, max=10.0, min=0.0, step=0.001),
+                io.Combo.Input('interpolation', options=['linear', 'ease-in', 'ease-out', 'ease-in-out']),
+                io.Custom('LATENT_KEYFRAME').Input('prev_latent_kf', optional=True),
+                io.Boolean.Input('print_keyframes', optional=True, default=False)
+            ],
+            outputs=[
+                io.Custom('LATENT_KEYFRAME').Output('LATENT_KF', is_output_list=False)
+            ]
+        )
 
-    RETURN_NAMES = ("LATENT_KF", )
-    RETURN_TYPES = ("LATENT_KEYFRAME", )
-    FUNCTION = "load_keyframe"
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self,
+    @classmethod
+    def execute(cls,
                         batch_index_from: int,
                         strength_from: float,
                         batch_index_to_excl: int,
@@ -407,28 +408,27 @@ class LatentKeyframeInterpolationNode:
         for latent_keyframe in prev_latent_keyframe.keyframes:
             curr_latent_keyframe.add(latent_keyframe)
 
-        return (curr_latent_keyframe,)
+        return io.NodeOutput(curr_latent_keyframe,)
 
-
-class LatentKeyframeBatchedGroupNode:
+class LatentKeyframeBatchedGroupNode(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "float_strengths": ("FLOAT", {"default": -1, "min": -1, "step": 0.001, "forceInput": True}),
-            },
-            "optional": {
-                "prev_latent_kf": ("LATENT_KEYFRAME", ),
-                "print_keyframes": ("BOOLEAN", {"default": False}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id='LatentKeyframeBatchedGroup',
+            display_name='Latent Keyframe From List 🛂🅐🅒🅝',
+            category='Adv-ControlNet 🛂🅐🅒🅝/keyframes',
+            inputs=[
+                io.Float.Input('float_strengths', default=-1, force_input=True, min=-1, step=0.001),
+                io.Custom('LATENT_KEYFRAME').Input('prev_latent_kf', optional=True),
+                io.Boolean.Input('print_keyframes', optional=True, default=False)
+            ],
+            outputs=[
+                io.Custom('LATENT_KEYFRAME').Output('LATENT_KF', is_output_list=False)
+            ]
+        )
 
-    RETURN_NAMES = ("LATENT_KF", )
-    RETURN_TYPES = ("LATENT_KEYFRAME", )
-    FUNCTION = "load_keyframe"
-    CATEGORY = "Adv-ControlNet 🛂🅐🅒🅝/keyframes"
-
-    def load_keyframe(self, float_strengths: Union[float, list[float]],
+    @classmethod
+    def execute(cls, float_strengths: Union[float, list[float]],
                       prev_latent_kf: LatentKeyframeGroup=None,
                       prev_latent_keyframe: LatentKeyframeGroup=None, # old name
                       print_keyframes=False):
@@ -458,4 +458,4 @@ class LatentKeyframeBatchedGroupNode:
         for latent_keyframe in prev_latent_keyframe.keyframes:
             curr_latent_keyframe.add(latent_keyframe)
 
-        return (curr_latent_keyframe,)
+        return io.NodeOutput(curr_latent_keyframe,)
