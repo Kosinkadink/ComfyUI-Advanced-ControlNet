@@ -26,9 +26,6 @@ class TimestepKeyframeNode:
                 "guarantee_steps": ("INT", {"default": 1, "min": 0, "max": BIGMAX}),
                 "mask_optional": ("MASK", ),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_NAMES = ("TIMESTEP_KF", )
@@ -85,9 +82,6 @@ class TimestepKeyframeInterpolationNode:
                 "mask_optional": ("MASK", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_NAMES = ("TIMESTEP_KF", )
@@ -146,9 +140,6 @@ class TimestepKeyframeFromStrengthListNode:
                 "mask_optional": ("MASK", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_NAMES = ("TIMESTEP_KF", )
@@ -205,9 +196,6 @@ class LatentKeyframeNode:
             "optional": {
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     RETURN_NAMES = ("LATENT_KF", )
@@ -244,9 +232,6 @@ class LatentKeyframeGroupNode:
                 "latent_optional": ("LATENT", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_NAMES = ("LATENT_KF", )
@@ -366,9 +351,6 @@ class LatentKeyframeInterpolationNode:
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     RETURN_NAMES = ("LATENT_KF", )
@@ -439,9 +421,6 @@ class LatentKeyframeBatchedGroupNode:
                 "prev_latent_kf": ("LATENT_KEYFRAME", ),
                 "print_keyframes": ("BOOLEAN", {"default": False}),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     RETURN_NAMES = ("LATENT_KF", )

@@ -15,9 +15,6 @@ class DefaultWeights:
             "optional": {
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -46,9 +43,6 @@ class ScaledSoftMaskedUniversalWeights:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -82,9 +76,6 @@ class ScaledSoftUniversalWeights:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -121,9 +112,6 @@ class SoftControlNetWeightsSD15:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -166,9 +154,6 @@ class CustomControlNetWeightsSD15:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -217,9 +202,6 @@ class CustomControlNetWeightsFlux:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -252,9 +234,6 @@ class CustomControlNetWeightsAnima:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            },
         }
 
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -286,9 +265,6 @@ class SoftT2IAdapterWeights:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -317,9 +293,6 @@ class CustomT2IAdapterWeights:
                 "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
@@ -346,9 +319,6 @@ class ExtrasMiddleMultNode:
             "optional": {
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CN_WEIGHTS_EXTRAS",)
@@ -372,9 +342,6 @@ class AnimaLLLiteExtras:
             },
             "optional": {
                 "cn_extras": ("CN_WEIGHTS_EXTRAS",),
-            },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             },
         }
 

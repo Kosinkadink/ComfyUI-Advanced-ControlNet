@@ -46,9 +46,6 @@ class DiffControlNetLoaderAdvanced:
             "optional": {
                 "_tk_opt": ("TIMESTEP_KEYFRAME", ),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
     
     RETURN_TYPES = ("CONTROL_NET", )
@@ -107,9 +104,6 @@ class AdvancedControlNetApply:
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "vae_optional": ("VAE",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     RETURN_TYPES = ("CONDITIONING","CONDITIONING",)
@@ -211,9 +205,6 @@ class AdvancedControlNetApplySingle:
                 "weights_override": ("CONTROL_NET_WEIGHTS", ),
                 "vae_optional": ("VAE",),
             },
-            "hidden": {
-                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
-            }
         }
 
     RETURN_TYPES = ("CONDITIONING","MODEL",)
