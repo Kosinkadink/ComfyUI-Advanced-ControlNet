@@ -1,7 +1,7 @@
 from comfy_api.latest import ComfyExtension, io
 
 from .nodes_main import (ControlNetLoaderAdvanced, DiffControlNetLoaderAdvanced, AnimaLLLiteLoaderAdvanced,
-                         AdvancedControlNetApply, AdvancedControlNetApplySingle)
+                         AdvancedControlNetApply, AdvancedControlNetInpaintingApply, AdvancedControlNetApplySingle)
 from .nodes_weight import (DefaultWeights, ScaledSoftMaskedUniversalWeights, ScaledSoftUniversalWeights,
                            SoftControlNetWeightsSD15, CustomControlNetWeightsSD15, CustomControlNetWeightsFlux,
                            CustomControlNetWeightsAnima, SoftT2IAdapterWeights, CustomT2IAdapterWeights, ExtrasMiddleMultNode,
@@ -32,6 +32,7 @@ class AdvancedControlNetExtension(ComfyExtension):
             LatentKeyframeBatchedGroupNode,
             LatentKeyframeGroupNode,
             AdvancedControlNetApply,
+            AdvancedControlNetInpaintingApply,
             AdvancedControlNetApplySingle,
             ControlNetLoaderAdvanced,
             DiffControlNetLoaderAdvanced,
