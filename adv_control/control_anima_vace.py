@@ -18,6 +18,7 @@ import comfy
 import comfy.model_management
 import comfy.utils
 from comfy.latent_formats import Wan21
+from comfy.ldm.common_dit import pad_to_patch_size
 from comfy.ldm.cosmos.predict2 import Block as AnimaBlock, PatchEmbed
 
 from .control import ControlNetAdvanced
@@ -451,6 +452,24 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         dit = self._dit_ref
         if dit is not None:
             x_5d = x_noisy if x_noisy.ndim == 5 else x_noisy.unsqueeze(2)
+
+            # Pad base + control latent to the DiT patch grid the same way
+            # _forward does (circular, (T, S, S)). ComfyUI hands controlnets the
+            # *unpadded* latent; without this, latents whose spatial dims aren't
+            # multiples of patch_spatial (e.g. 1440x1080 -> 135x180 latent, 135
+            # odd) hit the PatchEmbed divisibility assert inside both
+            # prepare_embedded_sequence and control_embedder. Both must be padded
+            # identically so the control token grid matches the padded base
+            # block outputs the forward hooks fire on (block 0 adds them
+            # element-wise). No crop is needed on the hints: _forward already
+            # crops the final unpatchified output back to the original latent
+            # shape, discarding the padded-edge contribution.
+            patch_size = (dit.patch_temporal, dit.patch_spatial, dit.patch_spatial)
+            x_5d = pad_to_patch_size(x_5d, patch_size)
+            control_latent = pad_to_patch_size(
+                self.cond_hint.to(device=x_noisy.device, dtype=dtype), patch_size
+            )
+
             x_B_T_H_W_D, rope_emb, extra_pos_emb = dit.prepare_embedded_sequence(x_5d)
 
             timestep = self.model_sampling_current.timestep(t)
@@ -463,7 +482,7 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
             context = comfy.model_management.cast_to_device(context, x_B_T_H_W_D.device, dtype)
 
             hints = self.vace(
-                control_latent=self.cond_hint.to(device=x_B_T_H_W_D.device, dtype=dtype),
+                control_latent=control_latent,
                 x_base_tokens=x_B_T_H_W_D,
                 emb_B_T_D=t_emb,
                 crossattn_emb=context,
