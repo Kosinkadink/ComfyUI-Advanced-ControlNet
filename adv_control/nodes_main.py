@@ -17,7 +17,7 @@ class ControlNetLoaderAdvanced(io.ComfyNode):
             category='Adv-ControlNet 🛂🅐🅒🅝',
             inputs=[
                 io.Combo.Input('cnet', options=folder_paths.get_filename_list("controlnet")),
-                io.Custom('TIMESTEP_KEYFRAME').Input('_tk_opt', optional=True)
+                io.Custom('TIMESTEP_KEYFRAME').Input('_tk_opt', display_name='timestep_kf', optional=True)
             ],
             outputs=[
                 io.ControlNet.Output('CONTROL_NET', is_output_list=False)
@@ -43,7 +43,7 @@ class DiffControlNetLoaderAdvanced(io.ComfyNode):
             inputs=[
                 io.Model.Input('model'),
                 io.Combo.Input('cnet', options=folder_paths.get_filename_list("controlnet")),
-                io.Custom('TIMESTEP_KEYFRAME').Input('_tk_opt', optional=True)
+                io.Custom('TIMESTEP_KEYFRAME').Input('_tk_opt', display_name='timestep_kf', optional=True)
             ],
             outputs=[
                 io.ControlNet.Output('CONTROL_NET', is_output_list=False)
@@ -97,11 +97,12 @@ class AdvancedControlNetApply(io.ComfyNode):
                 io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
                 io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
                 io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
-                io.Mask.Input('mask_optional', optional=True),
+                io.Mask.Input('mask_optional', display_name='effect_mask', optional=True),
                 io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
                 io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
                 io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True),
-                io.Vae.Input('vae_optional', optional=True)
+                io.Vae.Input('vae_optional', display_name='vae', optional=True),
+                io.Mask.Input('inpaint_mask', optional=True)
             ],
             outputs=[
                 io.Conditioning.Output('positive', is_output_list=False),
@@ -113,11 +114,17 @@ class AdvancedControlNetApply(io.ComfyNode):
     def execute(cls, positive, negative, control_net, image, strength, start_percent, end_percent,
                          mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
-                         weights_override: ControlWeights=None, control_apply_to_uncond=False, extra_concat=None):
+                         weights_override: ControlWeights=None, control_apply_to_uncond=False,
+                         inpaint_mask: Tensor=None):
         if strength == 0 or (mask_optional is not None and mask_optional.count_nonzero().item() == 0):
             return io.NodeOutput(positive, negative)
-        if extra_concat is None:
-            extra_concat = []
+
+        extra_concat = []
+        if inpaint_mask is not None and getattr(control_net, "concat_mask", False):
+            source_mask = 1.0 - inpaint_mask.reshape((-1, 1, inpaint_mask.shape[-2], inpaint_mask.shape[-1]))
+            mask_apply = comfy.utils.common_upscale(source_mask, image.shape[2], image.shape[1], "bilinear", "center").round()
+            image = image * mask_apply.movedim(1, -1).repeat(1, 1, 1, image.shape[3])
+            extra_concat = [source_mask]
 
         control_hint = image.movedim(-1,1)
         cnets = {}
@@ -156,9 +163,9 @@ class AdvancedControlNetApply(io.ComfyNode):
                                 elif not vae_optional:
                                     # make sure SD3 ControlNet will get a special message instead of generic type mention
                                     if is_sd3_advanced_controlnet(c_net):
-                                        raise Exception(f"SD3 ControlNet requires vae_optional input, but got None.")
+                                        raise Exception(f"SD3 ControlNet requires vae input, but got None.")
                                     else:
-                                        raise Exception(f"Type '{type(c_net).__name__}' requires vae_optional input, but got None.")
+                                        raise Exception(f"Type '{type(c_net).__name__}' requires vae input, but got None.")
                             # apply optional parameters and overrides, if provided
                             if timestep_kf is not None:
                                 c_net.set_timestep_keyframes(timestep_kf)
@@ -186,62 +193,6 @@ class AdvancedControlNetApply(io.ComfyNode):
         return io.NodeOutput(out[0], out[1])
     
 
-class AdvancedControlNetInpaintingApply(io.ComfyNode):
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id='ACN_AdvancedControlNetInpaintingApply',
-            display_name='Apply Advanced ControlNet Inpainting 🛂🅐🅒🅝',
-            category='Adv-ControlNet 🛂🅐🅒🅝',
-            inputs=[
-                io.Conditioning.Input('positive'),
-                io.Conditioning.Input('negative'),
-                io.ControlNet.Input('control_net'),
-                io.Vae.Input('vae'),
-                io.Image.Input('image'),
-                io.Mask.Input('inpaint_mask'),
-                io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
-                io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
-                io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
-                io.Mask.Input('effect_mask_optional', optional=True),
-                io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
-                io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
-                io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True)
-            ],
-            outputs=[
-                io.Conditioning.Output('positive', is_output_list=False),
-                io.Conditioning.Output('negative', is_output_list=False)
-            ]
-        )
-
-    @classmethod
-    def execute(cls, positive, negative, control_net, vae, image, inpaint_mask, strength, start_percent, end_percent,
-                effect_mask_optional: Tensor=None, timestep_kf: TimestepKeyframeGroup=None,
-                latent_kf_override: LatentKeyframeGroup=None, weights_override: ControlWeights=None):
-        if not getattr(control_net, "concat_mask", False):
-            raise ValueError("The provided ControlNet does not use an inpaint source mask; use Apply Advanced ControlNet instead.")
-
-        source_mask = 1.0 - inpaint_mask.reshape((-1, 1, inpaint_mask.shape[-2], inpaint_mask.shape[-1]))
-        mask_apply = comfy.utils.common_upscale(source_mask, image.shape[2], image.shape[1], "bilinear", "center").round()
-        image = image * mask_apply.movedim(1, -1).repeat(1, 1, 1, image.shape[3])
-
-        return AdvancedControlNetApply.execute(
-            positive=positive,
-            negative=negative,
-            control_net=control_net,
-            image=image,
-            strength=strength,
-            start_percent=start_percent,
-            end_percent=end_percent,
-            mask_optional=effect_mask_optional,
-            vae_optional=vae,
-            timestep_kf=timestep_kf,
-            latent_kf_override=latent_kf_override,
-            weights_override=weights_override,
-            extra_concat=[source_mask]
-        )
-
-
 class AdvancedControlNetApplySingle(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -256,11 +207,12 @@ class AdvancedControlNetApplySingle(io.ComfyNode):
                 io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
                 io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
                 io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
-                io.Mask.Input('mask_optional', optional=True),
+                io.Mask.Input('mask_optional', display_name='effect_mask', optional=True),
                 io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
                 io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
                 io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True),
-                io.Vae.Input('vae_optional', optional=True)
+                io.Vae.Input('vae_optional', display_name='vae', optional=True),
+                io.Mask.Input('inpaint_mask', optional=True)
             ],
             outputs=[
                 io.Conditioning.Output('CONDITIONING', is_output_list=False),
@@ -272,10 +224,10 @@ class AdvancedControlNetApplySingle(io.ComfyNode):
     def execute(cls, conditioning, control_net, image, strength, start_percent, end_percent,
                          mask_optional: Tensor=None, vae_optional=None,
                          timestep_kf: TimestepKeyframeGroup=None, latent_kf_override: LatentKeyframeGroup=None,
-                         weights_override: ControlWeights=None):
+                         weights_override: ControlWeights=None, inpaint_mask: Tensor=None):
         values = AdvancedControlNetApply.execute(positive=conditioning, negative=None, control_net=control_net, image=image,
                                                           strength=strength, start_percent=start_percent, end_percent=end_percent,
                                                           mask_optional=mask_optional, vae_optional=vae_optional,
                                                           timestep_kf=timestep_kf, latent_kf_override=latent_kf_override, weights_override=weights_override,
-                                                          control_apply_to_uncond=True)
+                                                          control_apply_to_uncond=True, inpaint_mask=inpaint_mask)
         return io.NodeOutput(values.args[0], None)

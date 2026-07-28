@@ -2,9 +2,9 @@
 
 This reviewer example adapts the active inpainting branch of ComfyUI's official
 Qwen Image workflow. It uses **Load Advanced ControlNet Model** and **Apply
-Advanced ControlNet Inpainting**, while retaining the official Qwen base
-pipeline and the bypassed optional Lightning LoRA. Node titles are left at
-their ComfyUI defaults; the workflow stores no node title overrides.
+Advanced ControlNet**, while retaining the official Qwen base pipeline and the
+bypassed optional Lightning LoRA. Node titles are left at their ComfyUI
+defaults; the workflow stores no node title overrides.
 
 ## Inputs and models
 
@@ -49,10 +49,10 @@ it requires changing the sampler settings appropriately.
 The two native **Load Image** nodes are intentionally separate. **Image To
 Mask** reads the red channel of the mask PNG. That source `inpaint_mask` defines
 the region supplied to the inpainting ControlNet and the latent noise mask. It
-is not the Advanced-ControlNet effect mask. `effect_mask_optional` is left
-unconnected and independently limits where control is injected. The Apply node
-also exposes unconnected timestep keyframe, latent keyframe, and weights ports
-for focused reviewer experiments.
+is not the Advanced-ControlNet effect mask. `effect_mask` is left unconnected
+and independently limits where control is injected. The Apply node also exposes
+unconnected timestep keyframe, latent keyframe, and weights ports for focused
+reviewer experiments.
 
 ## Measured validation evidence
 
@@ -75,10 +75,9 @@ here rather than inferred from the example image:
 - The existing Anima real workflow rerun retained exact before/after latent and
   pixel equality.
 
-Frontend and API validation for a missing source mask names `inpaint_mask`.
-Supplying an incompatible model produces this exact error:
-`The provided ControlNet does not use an inpaint source mask; use Apply Advanced
-ControlNet instead.`
+Frontend and API validation confirms that the normal Apply node exposes the
+optional source mask as `inpaint_mask`. When connected to a ControlNet without
+source-mask support, that input is ignored and the normal control path is used.
 
 Workflow and result screenshots are linked from the PR instead of stored here
 to avoid repository growth.

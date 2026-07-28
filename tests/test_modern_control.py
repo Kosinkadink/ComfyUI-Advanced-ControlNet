@@ -2,7 +2,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch, sentinel
+from unittest.mock import Mock, patch, sentinel
 
 comfyui_path = os.environ.get("COMFYUI_PATH")
 if comfyui_path:
@@ -13,7 +13,7 @@ import torch
 from comfy.controlnet import T2IAdapter
 
 from adv_control.control import ControlNetAdvanced, T2IAdapterAdvanced
-from adv_control.nodes_main import AdvancedControlNetApply, AdvancedControlNetInpaintingApply
+from adv_control.nodes_main import AdvancedControlNetApply
 from adv_control.utils import ControlWeights
 
 
@@ -157,6 +157,38 @@ class T2IAdapterTests(unittest.TestCase):
 
 
 class AdvancedControlNetApplyTests(unittest.TestCase):
+    def apply_control(self, concat_mask, image, inpaint_mask, effect_mask=None):
+        control_net = SimpleNamespace(concat_mask=concat_mask, copy=Mock(return_value=sentinel.control_copy))
+        applied_control = SimpleNamespace(
+            allow_condhint_latents=False,
+            require_vae=False,
+            postpone_condhint_latents_check=False,
+            disarm=Mock(),
+            set_cond_hint=Mock(),
+            set_cond_hint_mask=Mock(),
+            set_previous_controlnet=Mock(),
+            verify_all_weights=Mock(),
+        )
+        applied_control.set_cond_hint.return_value = applied_control
+        positive = [[sentinel.positive_tensor, {}]]
+
+        with patch("adv_control.nodes_main.convert_to_advanced", return_value=applied_control), \
+             patch("adv_control.nodes_main.is_advanced_controlnet", return_value=True):
+            AdvancedControlNetApply.execute(
+                positive=positive,
+                negative=[],
+                control_net=control_net,
+                image=image,
+                strength=1.0,
+                start_percent=0.0,
+                end_percent=1.0,
+                mask_optional=effect_mask,
+                vae_optional=sentinel.vae,
+                inpaint_mask=inpaint_mask,
+            )
+
+        return applied_control
+
     def test_all_zero_effect_mask_returns_original_conditioning(self):
         positive = [[sentinel.positive_tensor, {"name": "positive"}]]
         negative = [[sentinel.negative_tensor, {"name": "negative"}]]
@@ -175,50 +207,29 @@ class AdvancedControlNetApplyTests(unittest.TestCase):
         self.assertIs(result.args[0], positive)
         self.assertIs(result.args[1], negative)
 
-
-class AdvancedInpaintingApplyTests(unittest.TestCase):
     def test_source_mask_and_effect_mask_stay_independent(self):
         image = torch.ones((1, 2, 2, 3))
         inpaint_mask = torch.tensor([[[1.0, 0.0], [1.0, 0.0]]])
         effect_mask = torch.full((1, 2, 2), 0.25)
-        control_net = SimpleNamespace(concat_mask=True)
+        applied_control = self.apply_control(True, image, inpaint_mask, effect_mask)
 
-        with patch.object(AdvancedControlNetApply, "execute", return_value=sentinel.output) as apply:
-            result = AdvancedControlNetInpaintingApply.execute(
-                positive=sentinel.positive,
-                negative=sentinel.negative,
-                control_net=control_net,
-                vae=sentinel.vae,
-                image=image,
-                inpaint_mask=inpaint_mask,
-                strength=1.0,
-                start_percent=0.0,
-                end_percent=1.0,
-                effect_mask_optional=effect_mask,
-            )
+        inputs = applied_control.set_cond_hint.call_args.args
+        source_mask = 1.0 - inpaint_mask.unsqueeze(1)
+        torch.testing.assert_close(inputs[0], (image * source_mask.movedim(1, -1)).movedim(-1, 1))
+        torch.testing.assert_close(inputs[4][0], source_mask)
+        torch.testing.assert_close(applied_control.set_cond_hint_mask.call_args.args[0], effect_mask)
 
-        self.assertIs(result, sentinel.output)
-        inputs = apply.call_args.kwargs
-        torch.testing.assert_close(inputs["mask_optional"], effect_mask)
-        torch.testing.assert_close(inputs["extra_concat"][0], 1.0 - inpaint_mask.unsqueeze(1))
+    def test_inpaint_mask_is_ignored_for_other_controlnets(self):
+        image = torch.ones((1, 2, 2, 3))
+        inpaint_mask = torch.tensor([[[1.0, 0.0], [1.0, 0.0]]])
+        applied_control = self.apply_control(False, image, inpaint_mask)
+
+        inputs = applied_control.set_cond_hint.call_args.args
         torch.testing.assert_close(
-            inputs["image"],
-            torch.tensor([[[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]]]),
+            inputs[0],
+            image.movedim(-1, 1),
         )
-
-    def test_non_inpaint_control_has_readable_error(self):
-        with self.assertRaisesRegex(ValueError, "does not use an inpaint source mask"):
-            AdvancedControlNetInpaintingApply.execute(
-                positive=[],
-                negative=[],
-                control_net=SimpleNamespace(concat_mask=False),
-                vae=sentinel.vae,
-                image=torch.ones((1, 2, 2, 3)),
-                inpaint_mask=torch.zeros((1, 2, 2)),
-                strength=1.0,
-                start_percent=0.0,
-                end_percent=1.0,
-            )
+        self.assertEqual(inputs[4], [])
 
 
 if __name__ == "__main__":
