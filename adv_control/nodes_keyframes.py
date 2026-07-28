@@ -25,7 +25,7 @@ class TimestepKeyframeNode(io.ComfyNode):
                 io.Float.Input('null_latent_kf_strength', optional=True, default=0.0, max=10.0, min=0.0, step=0.001),
                 io.Boolean.Input('inherit_missing', optional=True, default=True),
                 io.Int.Input('guarantee_steps', optional=True, default=1, max=9007199254740991, min=0),
-                io.Mask.Input('mask_optional', optional=True)
+                io.Mask.Input('mask_optional', display_name='mask', optional=True)
             ],
             outputs=[
                 io.Custom('TIMESTEP_KEYFRAME').Output('TIMESTEP_KF', is_output_list=False)
@@ -80,7 +80,7 @@ class TimestepKeyframeInterpolationNode(io.ComfyNode):
                 io.Custom('LATENT_KEYFRAME').Input('latent_keyframe', optional=True),
                 io.Float.Input('null_latent_kf_strength', optional=True, default=0.0, max=10.0, min=0.0, step=0.001),
                 io.Boolean.Input('inherit_missing', optional=True, default=True),
-                io.Mask.Input('mask_optional', optional=True),
+                io.Mask.Input('mask_optional', display_name='mask', optional=True),
                 io.Boolean.Input('print_keyframes', optional=True, default=False)
             ],
             outputs=[
@@ -137,7 +137,7 @@ class TimestepKeyframeFromStrengthListNode(io.ComfyNode):
                 io.Custom('LATENT_KEYFRAME').Input('latent_keyframe', optional=True),
                 io.Float.Input('null_latent_kf_strength', optional=True, default=0.0, max=10.0, min=0.0, step=0.001),
                 io.Boolean.Input('inherit_missing', optional=True, default=True),
-                io.Mask.Input('mask_optional', optional=True),
+                io.Mask.Input('mask_optional', display_name='mask', optional=True),
                 io.Boolean.Input('print_keyframes', optional=True, default=False)
             ],
             outputs=[
@@ -226,7 +226,7 @@ class LatentKeyframeGroupNode(io.ComfyNode):
             inputs=[
                 io.String.Input('index_strengths', default='', multiline=True),
                 io.Custom('LATENT_KEYFRAME').Input('prev_latent_kf', optional=True),
-                io.Latent.Input('latent_optional', optional=True),
+                io.Latent.Input('latent_optional', display_name='latent', optional=True),
                 io.Boolean.Input('print_keyframes', optional=True, default=False)
             ],
             outputs=[

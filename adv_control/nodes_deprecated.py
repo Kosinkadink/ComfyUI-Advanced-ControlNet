@@ -266,12 +266,12 @@ class AdvancedControlNetApplyDEPR(io.ComfyNode):
                 io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
                 io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
                 io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
-                io.Mask.Input('mask_optional', optional=True),
+                io.Mask.Input('mask_optional', display_name='effect_mask', optional=True),
                 io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
                 io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
                 io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True),
-                io.Model.Input('model_optional', optional=True),
-                io.Vae.Input('vae_optional', optional=True)
+                io.Model.Input('model_optional', display_name='model', optional=True),
+                io.Vae.Input('vae_optional', display_name='vae', optional=True)
             ],
             outputs=[
                 io.Conditioning.Output('positive', is_output_list=False),
@@ -306,12 +306,12 @@ class AdvancedControlNetApplySingleDEPR(io.ComfyNode):
                 io.Float.Input('strength', default=1.0, max=10.0, min=0.0, step=0.01),
                 io.Float.Input('start_percent', default=0.0, max=1.0, min=0.0, step=0.001),
                 io.Float.Input('end_percent', default=1.0, max=1.0, min=0.0, step=0.001),
-                io.Mask.Input('mask_optional', optional=True),
+                io.Mask.Input('mask_optional', display_name='effect_mask', optional=True),
                 io.Custom('TIMESTEP_KEYFRAME').Input('timestep_kf', optional=True),
                 io.Custom('LATENT_KEYFRAME').Input('latent_kf_override', optional=True),
                 io.Custom('CONTROL_NET_WEIGHTS').Input('weights_override', optional=True),
-                io.Model.Input('model_optional', optional=True),
-                io.Vae.Input('vae_optional', optional=True)
+                io.Model.Input('model_optional', display_name='model', optional=True),
+                io.Vae.Input('vae_optional', display_name='vae', optional=True)
             ],
             outputs=[
                 io.Conditioning.Output('CONDITIONING', is_output_list=False),
@@ -341,7 +341,7 @@ class ControlNetLoaderAdvancedDEPR(io.ComfyNode):
             category='',
             inputs=[
                 io.Combo.Input('control_net_name', options=folder_paths.get_filename_list("controlnet")),
-                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', optional=True)
+                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', display_name='timestep_kf', optional=True)
             ],
             outputs=[
                 io.ControlNet.Output('CONTROL_NET', is_output_list=False)
@@ -371,7 +371,7 @@ class DiffControlNetLoaderAdvancedDEPR(io.ComfyNode):
             inputs=[
                 io.Model.Input('model'),
                 io.Combo.Input('control_net_name', options=folder_paths.get_filename_list("controlnet")),
-                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', optional=True)
+                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', display_name='timestep_kf', optional=True)
             ],
             outputs=[
                 io.ControlNet.Output('CONTROL_NET', is_output_list=False)

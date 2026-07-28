@@ -359,7 +359,7 @@ def prepare_mask_batch(mask: Tensor, shape: Tensor, multiplier: int=1, match_dim
     mask = mask.clone()
     if flux_shape is not None:
         multiplier = multiplier * 0.5
-        mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(round(flux_shape[-2]*multiplier), round(flux_shape[-1]*multiplier)), mode="bilinear")
+        mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(math.ceil(flux_shape[-2]*multiplier), math.ceil(flux_shape[-1]*multiplier)), mode="bilinear")
         mask = rearrange(mask, "b c h w -> b (h w) c")
     else:
         mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(round(shape[-2]*multiplier), round(shape[-1]*multiplier)), mode="bilinear")

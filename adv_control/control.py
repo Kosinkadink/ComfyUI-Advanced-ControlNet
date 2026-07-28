@@ -64,22 +64,22 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
 
         # make cond_hint appropriate dimensions
         # TODO: change this to not require cond_hint upscaling every step when self.sub_idxs are present
-        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * self.real_compression_ratio != self.cond_hint.shape[2] or x_noisy.shape[3] * self.real_compression_ratio != self.cond_hint.shape[3]:
+        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[-2] * self.real_compression_ratio != self.cond_hint.shape[-2] or x_noisy.shape[-1] * self.real_compression_ratio != self.cond_hint.shape[-1]:
             if self.cond_hint is not None:
                 del self.cond_hint
             self.cond_hint = None
             self.real_compression_ratio = self.compression_ratio
             compression_ratio = self.compression_ratio
             if self.vae is not None and self.mult_by_ratio_when_vae:
-                compression_ratio *= self.vae.downscale_ratio
+                compression_ratio *= self.vae.spacial_compression_encode()
             # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
             if self.sub_idxs is not None:
                 actual_cond_hint_orig = self.cond_hint_original
                 if self.cond_hint_original.size(0) < self.full_latent_length:
                     actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
-                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, self.upscale_algorithm, "center")
+                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[-1] * compression_ratio, x_noisy.shape[-2] * compression_ratio, self.upscale_algorithm, "center")
             else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * compression_ratio, x_noisy.shape[2] * compression_ratio, self.upscale_algorithm, "center")
+                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[-1] * compression_ratio, x_noisy.shape[-2] * compression_ratio, self.upscale_algorithm, "center")
             self.cond_hint = self.preprocess_image(self.cond_hint)
             if self.vae is not None:
                 loaded_models = comfy.model_management.loaded_models(only_currently_used=True)
@@ -93,7 +93,10 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
                 to_concat = []
                 for c in self.extra_concat_orig:
                     c = c.to(self.cond_hint.device)
-                    c = comfy.utils.common_upscale(c, self.cond_hint.shape[3], self.cond_hint.shape[2], self.upscale_algorithm, "center")
+                    c = comfy.utils.common_upscale(c, self.cond_hint.shape[-1], self.cond_hint.shape[-2], self.upscale_algorithm, "center")
+                    if c.ndim < self.cond_hint.ndim:
+                        c = c.unsqueeze(2)
+                        c = comfy.utils.repeat_to_batch_size(c, self.cond_hint.shape[2], dim=2)
                     to_concat.append(comfy.utils.repeat_to_batch_size(c, self.cond_hint.shape[0]))
                 self.cond_hint = torch.cat([self.cond_hint] + to_concat, dim=1)
 
@@ -123,7 +126,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         return super().pre_run_advanced(*args, **kwargs)
 
     def apply_advanced_strengths_and_masks(self, x: Tensor, batched_number: int, flux_shape=None):
-        if self.is_flux:
+        if self.is_flux or x.ndim == 3:
             flux_shape = self.x_noisy_shape
         return super().apply_advanced_strengths_and_masks(x, batched_number, flux_shape)
 

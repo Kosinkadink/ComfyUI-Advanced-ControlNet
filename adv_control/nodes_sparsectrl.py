@@ -24,7 +24,7 @@ class SparseCtrlLoaderAdvanced(io.ComfyNode):
                 io.Float.Input('motion_strength', default=1.0, max=10.0, min=0.0, step=0.001),
                 io.Float.Input('motion_scale', default=1.0, max=10.0, min=0.0, step=0.001),
                 io.Custom('SPARSE_METHOD').Input('sparse_method', optional=True),
-                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', optional=True),
+                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', display_name='timestep_kf', optional=True),
                 io.Combo.Input('context_aware', optional=True, options=['nearest_hint', 'off']),
                 io.Float.Input('sparse_hint_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
                 io.Float.Input('sparse_nonhint_mult', optional=True, default=1.0, max=10.0, min=0.0, step=0.001),
@@ -60,7 +60,7 @@ class SparseCtrlMergedLoaderAdvanced(io.ComfyNode):
                 io.Float.Input('motion_strength', default=1.0, max=10.0, min=0.0, step=0.001),
                 io.Float.Input('motion_scale', default=1.0, max=10.0, min=0.0, step=0.001),
                 io.Custom('SPARSE_METHOD').Input('sparse_method', optional=True),
-                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', optional=True)
+                io.Custom('TIMESTEP_KEYFRAME').Input('tk_optional', display_name='timestep_kf', optional=True)
             ],
             outputs=[
                 io.ControlNet.Output('CONTROL_NET', is_output_list=False)
