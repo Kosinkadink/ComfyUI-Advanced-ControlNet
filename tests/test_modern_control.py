@@ -27,9 +27,13 @@ class ControlModel:
     def __init__(self):
         self.hint = None
 
+    def state_dict(self):
+        return {}
+
     def __call__(self, x, hint, timesteps, context, **kwargs):
         self.hint = hint
         raise StopControlModel
+
 
 
 class VideoVAE:

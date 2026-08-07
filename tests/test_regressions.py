@@ -100,5 +100,63 @@ class ReferenceRegressionTests(unittest.TestCase):
         self.assertTrue(reference_injections.cleaned)
 
 
+class MaskPreparationTests(unittest.TestCase):
+    def test_prepare_mask_with_sub_idxs_slices_before_upscale(self):
+        from adv_control.utils import AdvancedControlBase
+
+        class DummyControl(AdvancedControlBase):
+            def __init__(self):
+                self.sub_idxs = [0, 2]
+                self.full_latent_length = 4
+                self.mask_cond_hint = None
+
+        control = DummyControl()
+        orig_mask = torch.ones((1, 1, 4, 4))
+        x_noisy = torch.zeros((2, 16, 8, 8))
+        control._prepare_mask("mask_cond_hint", orig_mask, x_noisy, t=None, cond=None, batched_number=1)
+        self.assertIsNotNone(control.mask_cond_hint)
+        self.assertEqual(control.mask_cond_hint.shape[0], 2)
+
+    def test_prepare_mask_invalidates_cache_on_orig_mask_replacement(self):
+        from adv_control.utils import AdvancedControlBase
+
+        class DummyControl(AdvancedControlBase):
+            def __init__(self):
+                self.sub_idxs = None
+                self.full_latent_length = 0
+                self.mask_cond_hint = None
+
+        control = DummyControl()
+        orig_mask_1 = torch.zeros((1, 1, 4, 4))
+        x_noisy = torch.zeros((2, 16, 8, 8))
+        control._prepare_mask("mask_cond_hint", orig_mask_1, x_noisy, t=None, cond=None, batched_number=1)
+        self.assertEqual(control.mask_cond_hint.mean().item(), 0.0)
+
+        # Replace orig_mask with a new tensor of ones (same spatial size)
+        orig_mask_2 = torch.ones((1, 1, 4, 4))
+        control._prepare_mask("mask_cond_hint", orig_mask_2, x_noisy, t=None, cond=None, batched_number=1)
+        self.assertEqual(control.mask_cond_hint.mean().item(), 1.0)
+
+    def test_prepare_mask_invalidates_cache_on_batch_size_change(self):
+        from adv_control.utils import AdvancedControlBase
+
+        class DummyControl(AdvancedControlBase):
+            def __init__(self):
+                self.sub_idxs = None
+                self.full_latent_length = 0
+                self.mask_cond_hint = None
+
+        control = DummyControl()
+        orig_mask = torch.ones((1, 1, 4, 4))
+        x_noisy_batch2 = torch.zeros((2, 16, 8, 8))
+        control._prepare_mask("mask_cond_hint", orig_mask, x_noisy_batch2, t=None, cond=None, batched_number=1)
+        self.assertEqual(control.mask_cond_hint.shape[0], 2)
+
+        # Change latent batch size from 2 to 4 while spatial dimensions stay same (8x8)
+        x_noisy_batch4 = torch.zeros((4, 16, 8, 8))
+        control._prepare_mask("mask_cond_hint", orig_mask, x_noisy_batch4, t=None, cond=None, batched_number=1)
+        self.assertEqual(control.mask_cond_hint.shape[0], 4)
+
+
 if __name__ == "__main__":
     unittest.main()
