@@ -855,16 +855,28 @@ class AdvancedControlBase:
         if orig_mask is not None:
             out_mask = getattr(self, attr_name)
             multiplier = 1 if direct_attn else 8
-            if self.sub_idxs is not None or out_mask is None or x_noisy.shape[2] * multiplier != out_mask.shape[1] or x_noisy.shape[3] * multiplier != out_mask.shape[2]:
+            actual_latent_length = x_noisy.shape[0] // batched_number
+            expected_batch = len(self.sub_idxs) if self.sub_idxs is not None else actual_latent_length
+            cached_orig_id = getattr(self, f"_{attr_name}_orig_id", None)
+
+            is_cache_invalid = (
+                self.sub_idxs is not None
+                or out_mask is None
+                or cached_orig_id != id(orig_mask)
+                or out_mask.shape[0] != expected_batch
+                or x_noisy.shape[2] * multiplier != out_mask.shape[-2]
+                or x_noisy.shape[3] * multiplier != out_mask.shape[-1]
+            )
+
+            if is_cache_invalid:
                 self._reset_attr(attr_name)
                 del out_mask
-                # TODO: perform upscale on only the sub_idxs masks at a time instead of all to conserve RAM
-                # resize mask and match batch count
-                out_mask = prepare_mask_batch(orig_mask, x_noisy.shape, multiplier=multiplier, match_shape=True)
-                actual_latent_length = x_noisy.shape[0] // batched_number
-                out_mask = extend_to_batch_size(out_mask, actual_latent_length if self.sub_idxs is None else self.full_latent_length)
                 if self.sub_idxs is not None:
-                    out_mask = out_mask[self.sub_idxs]
+                    mask_to_prep = extend_to_batch_size(orig_mask, self.full_latent_length)[self.sub_idxs]
+                else:
+                    mask_to_prep = extend_to_batch_size(orig_mask, actual_latent_length)
+                out_mask = prepare_mask_batch(mask_to_prep, x_noisy.shape, multiplier=multiplier, match_shape=True)
+                setattr(self, f"_{attr_name}_orig_id", id(orig_mask))
             # make cond_hint_mask length match x_noise
             if x_noisy.shape[0] != out_mask.shape[0]:
                 out_mask = broadcast_image_to_extend(out_mask, x_noisy.shape[0], batched_number)
@@ -913,6 +925,9 @@ class AdvancedControlBase:
         if self.weight_mask_cond_hint is not None:
             del self.weight_mask_cond_hint
             self.weight_mask_cond_hint = None
+        self._reset_attr("_mask_cond_hint_orig_id")
+        self._reset_attr("_tk_mask_cond_hint_orig_id")
+        self._reset_attr("_weight_mask_cond_hint_orig_id")
     
     def copy_to_advanced(self, copied: 'AdvancedControlBase'):
         copied.mask_cond_hint_original = self.mask_cond_hint_original

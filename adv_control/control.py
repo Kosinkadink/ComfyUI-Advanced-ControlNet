@@ -29,6 +29,7 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
         AdvancedControlBase.__init__(self, super(type(self), self), timestep_keyframes=timestep_keyframes, weights_default=ControlWeights.controlnet())
         self.is_flux = False
         self.x_noisy_shape = None
+        self._cached_cond_hint = None
 
     def get_universal_weights(self) -> ControlWeights:
         def cn_weights_func(idx: int, control: dict[str, list[Tensor]], key: str):
@@ -63,44 +64,57 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
             dtype = self.manual_cast_dtype
 
         # make cond_hint appropriate dimensions
-        # TODO: change this to not require cond_hint upscaling every step when self.sub_idxs are present
-        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[-2] * self.real_compression_ratio != self.cond_hint.shape[-2] or x_noisy.shape[-1] * self.real_compression_ratio != self.cond_hint.shape[-1]:
-            if self.cond_hint is not None:
-                del self.cond_hint
-            self.cond_hint = None
+        expected_batch = max(self.cond_hint_original.size(0), self.full_latent_length)
+        cached_orig_id = getattr(self, "_cached_cond_hint_orig_id", None)
+
+        if (
+            self._cached_cond_hint is None
+            or cached_orig_id != id(self.cond_hint_original)
+            or self._cached_cond_hint.shape[0] != expected_batch
+            or x_noisy.shape[-2] * self.real_compression_ratio != self._cached_cond_hint.shape[-2]
+            or x_noisy.shape[-1] * self.real_compression_ratio != self._cached_cond_hint.shape[-1]
+            or self._cached_cond_hint.device != x_noisy.device
+            or self._cached_cond_hint.dtype != dtype
+        ):
+            if self._cached_cond_hint is not None:
+                del self._cached_cond_hint
+            self._cached_cond_hint = None
+            setattr(self, "_cached_cond_hint_orig_id", id(self.cond_hint_original))
             self.real_compression_ratio = self.compression_ratio
             compression_ratio = self.compression_ratio
             if self.vae is not None and self.mult_by_ratio_when_vae:
                 compression_ratio *= self.vae.spacial_compression_encode()
-            # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None:
-                actual_cond_hint_orig = self.cond_hint_original
-                if self.cond_hint_original.size(0) < self.full_latent_length:
-                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
-                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[-1] * compression_ratio, x_noisy.shape[-2] * compression_ratio, self.upscale_algorithm, "center")
-            else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[-1] * compression_ratio, x_noisy.shape[-2] * compression_ratio, self.upscale_algorithm, "center")
-            self.cond_hint = self.preprocess_image(self.cond_hint)
+            actual_cond_hint_orig = self.cond_hint_original
+            if self.cond_hint_original.size(0) < self.full_latent_length:
+                actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+            self._cached_cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig, x_noisy.shape[-1] * compression_ratio, x_noisy.shape[-2] * compression_ratio, self.upscale_algorithm, "center")
+            self._cached_cond_hint = self.preprocess_image(self._cached_cond_hint)
             if self.vae is not None:
                 loaded_models = comfy.model_management.loaded_models(only_currently_used=True)
-                self.cond_hint = self.vae.encode(self.cond_hint.movedim(1, -1))
+                self._cached_cond_hint = self.vae.encode(self._cached_cond_hint.movedim(1, -1))
                 comfy.model_management.load_models_gpu(loaded_models)
                 if not self.mult_by_ratio_when_vae:
                     self.real_compression_ratio = 1
             if self.latent_format is not None:
-                self.cond_hint = self.latent_format.process_in(self.cond_hint)
+                self._cached_cond_hint = self.latent_format.process_in(self._cached_cond_hint)
             if len(self.extra_concat_orig) > 0:
                 to_concat = []
                 for c in self.extra_concat_orig:
-                    c = c.to(self.cond_hint.device)
-                    c = comfy.utils.common_upscale(c, self.cond_hint.shape[-1], self.cond_hint.shape[-2], self.upscale_algorithm, "center")
-                    if c.ndim < self.cond_hint.ndim:
+                    c = c.to(self._cached_cond_hint.device)
+                    c = comfy.utils.common_upscale(c, self._cached_cond_hint.shape[-1], self._cached_cond_hint.shape[-2], self.upscale_algorithm, "center")
+                    if c.ndim < self._cached_cond_hint.ndim:
                         c = c.unsqueeze(2)
-                        c = comfy.utils.repeat_to_batch_size(c, self.cond_hint.shape[2], dim=2)
-                    to_concat.append(comfy.utils.repeat_to_batch_size(c, self.cond_hint.shape[0]))
-                self.cond_hint = torch.cat([self.cond_hint] + to_concat, dim=1)
+                        c = comfy.utils.repeat_to_batch_size(c, self._cached_cond_hint.shape[2], dim=2)
+                    to_concat.append(comfy.utils.repeat_to_batch_size(c, self._cached_cond_hint.shape[0]))
+                self._cached_cond_hint = torch.cat([self._cached_cond_hint] + to_concat, dim=1)
 
-            self.cond_hint = self.cond_hint.to(device=x_noisy.device, dtype=dtype)
+            self._cached_cond_hint = self._cached_cond_hint.to(device=x_noisy.device, dtype=dtype)
+
+        if self.sub_idxs is not None:
+            self.cond_hint = self._cached_cond_hint[self.sub_idxs]
+        else:
+            self.cond_hint = self._cached_cond_hint
+
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
@@ -142,6 +156,11 @@ class ControlNetAdvanced(ControlNet, AdvancedControlBase):
     
     def cleanup_advanced(self):
         self.x_noisy_shape = None
+        if hasattr(self, "_cached_cond_hint") and self._cached_cond_hint is not None:
+            del self._cached_cond_hint
+            self._cached_cond_hint = None
+        if hasattr(self, "_cached_cond_hint_orig_id"):
+            del self._cached_cond_hint_orig_id
         return super().cleanup_advanced()
 
     @staticmethod
@@ -306,19 +325,32 @@ class SVDControlNetAdvanced(ControlNetAdvanced):
 
         output_dtype = x_noisy.dtype
         # make cond_hint appropriate dimensions
-        # TODO: change this to not require cond_hint upscaling every step when self.sub_idxs are present
-        if self.sub_idxs is not None or self.cond_hint is None or x_noisy.shape[2] * 8 != self.cond_hint.shape[2] or x_noisy.shape[3] * 8 != self.cond_hint.shape[3]:
-            if self.cond_hint is not None:
-                del self.cond_hint
-            self.cond_hint = None
-            # if self.cond_hint_original length greater or equal to real latent count, subdivide it before scaling
-            if self.sub_idxs is not None:
-                actual_cond_hint_orig = self.cond_hint_original
-                if self.cond_hint_original.size(0) < self.full_latent_length:
-                    actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
-                self.cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig[self.sub_idxs], x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(x_noisy.device)
-            else:
-                self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(x_noisy.device)
+        expected_batch = max(self.cond_hint_original.size(0), self.full_latent_length)
+        cached_orig_id = getattr(self, "_cached_cond_hint_orig_id", None)
+
+        if (
+            self._cached_cond_hint is None
+            or cached_orig_id != id(self.cond_hint_original)
+            or self._cached_cond_hint.shape[0] != expected_batch
+            or x_noisy.shape[2] * 8 != self._cached_cond_hint.shape[2]
+            or x_noisy.shape[3] * 8 != self._cached_cond_hint.shape[3]
+            or self._cached_cond_hint.device != x_noisy.device
+            or self._cached_cond_hint.dtype != dtype
+        ):
+            if self._cached_cond_hint is not None:
+                del self._cached_cond_hint
+            self._cached_cond_hint = None
+            setattr(self, "_cached_cond_hint_orig_id", id(self.cond_hint_original))
+            actual_cond_hint_orig = self.cond_hint_original
+            if self.cond_hint_original.size(0) < self.full_latent_length:
+                actual_cond_hint_orig = extend_to_batch_size(tensor=actual_cond_hint_orig, batch_size=self.full_latent_length)
+            self._cached_cond_hint = comfy.utils.common_upscale(actual_cond_hint_orig, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(x_noisy.device)
+
+        if self.sub_idxs is not None:
+            self.cond_hint = self._cached_cond_hint[self.sub_idxs]
+        else:
+            self.cond_hint = self._cached_cond_hint
+
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to_extend(self.cond_hint, x_noisy.shape[0], batched_number)
 
