@@ -411,6 +411,15 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         for base_idx, _ctrl_idx in self.vace.control_layers_mapping.items():
             block = dit.blocks[base_idx]
 
+            # Remove a stale hook left by a previous run. cleanup() is not
+            # guaranteed to run when sampling is interrupted or crashes, so the
+            # previous run's hook can stay attached to the base DiT block and
+            # re-apply the control on subsequent runs (the image then degrades
+            # into noise as the hooks accumulate across runs).
+            stale = getattr(block, "_acn_vace_hook", None)
+            if stale is not None and getattr(stale, "id", None) is not None:
+                stale.remove()
+
             def make_hook(bi):
                 def hook(module, args, kwargs, output):
                     to = kwargs.get("transformer_options") or {}
@@ -423,9 +432,9 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
                     return output + hint.to(dtype=output.dtype)
                 return hook
 
-            self._hook_handles.append(
-                block.register_forward_hook(make_hook(base_idx), with_kwargs=True)
-            )
+            handle = block.register_forward_hook(make_hook(base_idx), with_kwargs=True)
+            block._acn_vace_hook = handle
+            self._hook_handles.append(handle)
 
     def get_control_advanced(self, x_noisy, t, cond, batched_number, transformer_options):
         control_prev = None
@@ -597,6 +606,11 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         for h in self._hook_handles:
             h.remove()
         self._hook_handles = []
+        if self._dit_ref is not None:
+            for base_idx in self.vace.control_layers_mapping:
+                block = self._dit_ref.blocks[base_idx]
+                if getattr(block, "_acn_vace_hook", None) is not None:
+                    del block._acn_vace_hook
         self._dit_ref = None
         return super().cleanup_advanced()
 
