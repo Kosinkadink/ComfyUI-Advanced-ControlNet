@@ -151,6 +151,9 @@ class VACEControlNetAnima(nn.Module):
 
         # Anima concatenates a padding-mask channel to the latent
         # (latent_channels + 1), matching what the base DiT's x_embedder sees.
+        if operations is None:
+            operations = comfy.ops.manual_cast
+
         embed_in_channels = latent_channels + (1 if concat_padding_mask else 0)
         self.control_embedder = PatchEmbed(
             spatial_patch_size=patch_spatial,
@@ -159,9 +162,6 @@ class VACEControlNetAnima(nn.Module):
             out_channels=model_channels,
             operations=operations,
         )
-
-        if operations is None:
-            operations = comfy.ops.manual_cast
 
         self.control_blocks = nn.ModuleList([
             VACEControlBlock(
@@ -182,7 +182,8 @@ class VACEControlNetAnima(nn.Module):
         ])
 
     def init_weights(self):
-        self.control_embedder.init_weights()
+        # comfy.ldm.cosmos.predict2.PatchEmbed has no init_weights method; only
+        # the zero-conv projections on each control block need explicit init.
         for cb in self.control_blocks:
             cb.init_weights()
 
@@ -289,14 +290,18 @@ def load_anima_vace(ckpt_path: str, controlnet_data: dict = None, timestep_keyfr
                 model_channels = v.shape[0]
                 break
 
-    # Re-derive block spacing from the actual control-block count in the file.
+    # Count the control blocks present in the checkpoint. Only fall back to
+    # re-deriving the spacing from this count when the metadata is absent —
+    # forcing `num_blocks // n_ctrl` over a stored spacing can silently shift
+    # the injection layers (e.g. 28 blocks with control every 8 -> [0,8,16,24]
+    # would be rewritten as [0,7,14,21]).
     max_ctrl_idx = -1
     for k in controlnet_data:
         if k.startswith("control_blocks."):
             max_ctrl_idx = max(max_ctrl_idx, int(k.split(".")[1]))
-    if max_ctrl_idx >= 0 and condition_strategy == "spaced":
-        n_ctrl = max_ctrl_idx + 1
-        vace_block_every_n = num_blocks // n_ctrl if n_ctrl > 0 else vace_block_every_n
+    n_ctrl = max_ctrl_idx + 1 if max_ctrl_idx >= 0 else 0
+    if n_ctrl > 0 and condition_strategy == "spaced" and "vace.block_every_n" not in meta:
+        vace_block_every_n = num_blocks // n_ctrl
 
     # Anima 2B constants.
     num_heads = 16
@@ -322,6 +327,13 @@ def load_anima_vace(ckpt_path: str, controlnet_data: dict = None, timestep_keyfr
         adaln_lora_dim=adaln_lora_dim,
         operations=comfy.ops.manual_cast,
     )
+
+    if n_ctrl > 0 and len(vace_model.control_layers) != n_ctrl:
+        logger.warning(
+            f"[AnimaVACE] checkpoint has {n_ctrl} control blocks but the resolved "
+            f"architecture expects {len(vace_model.control_layers)} control layers; "
+            f"injection may be misaligned."
+        )
 
     info = vace_model.load_state_dict(controlnet_data, strict=False)
     if info.missing_keys:
@@ -378,6 +390,22 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
     def pre_run_advanced(self, model, percent_to_timestep_function):
         super().pre_run_advanced(model, percent_to_timestep_function)
         dit = model.diffusion_model
+        required_attrs = ("blocks", "prepare_embedded_sequence", "t_embedder",
+                          "t_embedding_norm", "patch_temporal", "patch_spatial")
+        missing = [attr for attr in required_attrs if not hasattr(dit, attr)]
+        if missing:
+            raise Exception(
+                f"{type(self).__name__} requires a Cosmos Predict2 / Anima DiT model, but "
+                f"the target model's diffusion_model is missing: {missing}. "
+                f"Is the ControlNet applied to an Anima (Cosmos Predict2) model?"
+            )
+        max_base_idx = max(self.vace.control_layers_mapping.keys())
+        if len(dit.blocks) <= max_base_idx:
+            raise Exception(
+                f"{type(self).__name__} expects at least {max_base_idx + 1} DiT blocks, but "
+                f"the target model only has {len(dit.blocks)}. Is the ControlNet applied to "
+                f"an Anima (Cosmos Predict2) model?"
+            )
         self._dit_ref = dit
 
         for base_idx, _ctrl_idx in self.vace.control_layers_mapping.items():
@@ -451,6 +479,11 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         # base block 0 does.
         dit = self._dit_ref
         if dit is not None:
+            # Match the base DiT's input: _apply_model feeds it
+            # `calculate_input(t, x)` (for Cosmos RFLOW, x * (1 - σ/(σ+1))).
+            # get_control hands us the *unscaled* noise; scaling it here keeps
+            # the control branch's block-0 fusion consistent with the base model.
+            x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
             x_5d = x_noisy if x_noisy.ndim == 5 else x_noisy.unsqueeze(2)
 
             # Pad base + control latent to the DiT patch grid the same way
@@ -475,7 +508,11 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
             timestep = self.model_sampling_current.timestep(t)
             if timestep.ndim == 1:
                 timestep = timestep.unsqueeze(1)
-            t_emb, adaln_lora = dit.t_embedder(timestep.to(x_B_T_H_W_D.device))
+            # Mirror the base _forward: cast the sinusoidal embedding to the
+            # model dtype before the MLP (dit.t_embedder[0]=Timesteps,
+            # [1]=TimestepEmbedding), avoiding an fp32/bf16 mismatch.
+            t_sin = dit.t_embedder[0](timestep.to(x_B_T_H_W_D.device)).to(x_B_T_H_W_D.dtype)
+            t_emb, adaln_lora = dit.t_embedder[1](t_sin)
             t_emb = dit.t_embedding_norm(t_emb)
 
             context = cond.get('crossattn_controlnet', cond['c_crossattn'])
@@ -499,10 +536,32 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
             for ci, hint in hints.items():
                 if hint_mask is not None:
                     hint = hint * hint_mask
-                published[ci] = hint * self.strength
+                published[ci] = self._apply_hint_strengths(hint, batched_number) * self.strength
             transformer_options[ANIMA_VACE_HINTS_KEY] = published
 
         return control_prev
+
+    def _apply_hint_strengths(self, hint: torch.Tensor, batched_number: int) -> torch.Tensor:
+        """Apply the ACN strengths that control_merge_inject normally applies.
+
+        The hook-based VACE path never builds self.control, so
+        apply_advanced_strengths_and_masks is bypassed. Apply its batch-wise
+        pieces here: latent keyframes, the CFG uncond multiplier, and the
+        current timestep keyframe strength. Base strength is applied by the
+        caller; per-index soft weights are not supported for VACE hints.
+        """
+        if self.latent_keyframes is not None:
+            hint = hint * self.calc_latent_keyframe_mults(x=hint, batched_number=batched_number)
+        if self.weights is not None and self.weights.has_uncond_multiplier \
+                and self.cond_or_uncond is not None:
+            actual_length = hint.size(0) // batched_number
+            for idx, cond_type in enumerate(self.cond_or_uncond):
+                if cond_type == 1:
+                    hint[actual_length*idx:actual_length*(idx+1)] *= self.weights.uncond_multiplier
+        if self._current_timestep_keyframe is not None \
+                and self._current_timestep_keyframe.strength != 1.0:
+            hint = hint * self._current_timestep_keyframe.strength
+        return hint
 
     def _build_hint_mask(self, hints: dict):
         """Build a single (B, 1, H_tok, W_tok, 1) mask gating all hints.
