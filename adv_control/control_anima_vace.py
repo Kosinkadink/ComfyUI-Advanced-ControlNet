@@ -22,7 +22,6 @@ from comfy.ldm.common_dit import pad_to_patch_size
 from comfy.ldm.cosmos.predict2 import Block as AnimaBlock, PatchEmbed
 
 from .control import ControlNetAdvanced
-from .logger import logger
 from .utils import (
     AdvancedControlBase,
     ControlWeights,
@@ -341,18 +340,14 @@ def load_anima_vace(ckpt_path: str, controlnet_data: dict = None, timestep_keyfr
         operations=comfy.ops.manual_cast,
     )
 
-    if n_ctrl > 0 and len(vace_model.control_layers) != n_ctrl:
-        logger.warning(
-            f"[AnimaVACE] checkpoint has {n_ctrl} control blocks but the resolved "
-            f"architecture expects {len(vace_model.control_layers)} control layers; "
-            f"injection may be misaligned."
+    # Missing keys would leave uninitialized weights and produce noise, so fail instead.
+    missing, unexpected = vace_model.load_state_dict(controlnet_data, strict=False)
+    if missing or unexpected:
+        raise Exception(
+            f"Anima VACE checkpoint '{ckpt_path}' does not match the resolved architecture "
+            f"(control layers {vace_model.control_layers}). Missing keys ({len(missing)}): {missing[:5]}; "
+            f"unexpected keys ({len(unexpected)}): {unexpected[:5]}."
         )
-
-    info = vace_model.load_state_dict(controlnet_data, strict=False)
-    if info.missing_keys:
-        logger.info(f"[AnimaVACE] missing keys ({len(info.missing_keys)}): {info.missing_keys[:5]}...")
-    if info.unexpected_keys:
-        logger.info(f"[AnimaVACE] unexpected keys ({len(info.unexpected_keys)}): {info.unexpected_keys[:5]}...")
 
     vace_model = vace_model.to(unet_dtype)
 
