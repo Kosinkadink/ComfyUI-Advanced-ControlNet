@@ -572,8 +572,8 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             raise Exception("This is a CtrLoRA; use the Load CtrLoRA Model node.")
         elif controlnet_type == ControlWeightType.ANIMA_VACE:
             from .control_anima_vace import load_anima_vace
-            control = load_anima_vace(ckpt_path, controlnet_data=controlnet_data,
-                                     timestep_keyframe=timestep_keyframe, model=model)
+            control = load_anima_vace(ckpt_path, controlnet_data=controlnet_data, metadata=metadata,
+                                     timestep_keyframe=timestep_keyframe)
     # otherwise, load vanilla ControlNet
     else:
         try:

@@ -62,21 +62,11 @@ class VACEControlBlock(nn.Module):
         self.x_dim = x_dim
         self.use_after_proj = use_after_proj
 
-        # Zero-conv projections (zero-initialised so hints start at exactly 0).
+        # Zero-conv projections.
         if block_id == 0:
             self.before_proj = nn.Linear(x_dim, x_dim)
         if use_after_proj:
             self.after_proj = nn.Linear(x_dim, x_dim)
-
-    def init_weights(self):
-        if hasattr(self.block, "init_weights"):
-            self.block.init_weights()
-        if self.block_id == 0:
-            nn.init.zeros_(self.before_proj.weight)
-            nn.init.zeros_(self.before_proj.bias)
-        if self.use_after_proj:
-            nn.init.zeros_(self.after_proj.weight)
-            nn.init.zeros_(self.after_proj.bias)
 
     def forward(self, c: torch.Tensor, x_base: torch.Tensor, **block_kwargs):
         """Run one control block.
@@ -155,9 +145,6 @@ class VACEControlNetAnima(nn.Module):
 
         # Anima concatenates a padding-mask channel to the latent
         # (latent_channels + 1), matching what the base DiT's x_embedder sees.
-        if operations is None:
-            operations = comfy.ops.manual_cast
-
         embed_in_channels = latent_channels + (1 if concat_padding_mask else 0)
         self.control_embedder = PatchEmbed(
             spatial_patch_size=patch_spatial,
@@ -184,12 +171,6 @@ class VACEControlNetAnima(nn.Module):
             )
             for i in range(len(self.control_layers))
         ])
-
-    def init_weights(self):
-        # comfy.ldm.cosmos.predict2.PatchEmbed has no init_weights method; only
-        # the zero-conv projections on each control block need explicit init.
-        for cb in self.control_blocks:
-            cb.init_weights()
 
     @property
     def dtype(self):
@@ -274,20 +255,11 @@ class VACEControlNetAnima(nn.Module):
 # Loader
 # --------------------------------------------------------------------------- #
 
-def load_anima_vace(ckpt_path: str, controlnet_data: dict = None, timestep_keyframe=None, model=None):
+def load_anima_vace(ckpt_path: str, controlnet_data: dict, metadata=None, timestep_keyframe=None):
     """Load an Anima VACE ControlNet checkpoint and return an AnimaVACEAdvanced."""
-    if controlnet_data is None:
-        controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
-
     # Architecture is read from safetensors metadata (written by the sd-scripts
     # trainer); fall back to sensible Anima-2B defaults and weight-shape inference.
-    from safetensors import safe_open
-    meta = {}
-    try:
-        with safe_open(ckpt_path, framework="pt") as f:
-            meta = dict(f.metadata() or {})
-    except Exception:
-        pass
+    meta = metadata or {}
 
     model_channels = int(meta.get("vace.model_channels", "2048"))
     num_blocks = int(meta.get("vace.num_blocks", "28"))
@@ -370,9 +342,9 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
     publishes the per-block hints onto the per-run transformer_options dict
     (key ANIMA_VACE_HINTS_KEY). Forward hooks registered on the target DiT
     blocks read from that dict and add the hint to the block output. Because
-    the hints live on transformer_options (rebuilt every step) rather than a
-    persistent attribute, a hook left attached by an interrupted/failed run
-    can never inject stale control into a later run.
+    the hints live on transformer_options (rebuilt every step), hooks never
+    inject hints from an earlier step or run; pre_run_advanced still removes
+    a hook left by an interrupted run so the hints are not added twice.
     """
 
     def __init__(self, vace_model, timestep_keyframes, load_device=None, manual_cast_dtype=None):
@@ -390,7 +362,6 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         # VACE takes pixel-space control images (e.g. depth maps) that must be
         # VAE-encoded first; require_vae makes the Apply node enforce a VAE.
         self.vace = vace_model
-        self.vace_model = vace_model
         self.require_vae = True
         self._hook_handles = []
         self._dit_ref = None
@@ -425,7 +396,7 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
             # re-apply the control on subsequent runs (the image then degrades
             # into noise as the hooks accumulate across runs).
             stale = getattr(block, "_acn_vace_hook", None)
-            if stale is not None and getattr(stale, "id", None) is not None:
+            if stale is not None:
                 stale.remove()
 
             def make_hook(bi):
@@ -497,9 +468,9 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         dit = self._dit_ref
         if dit is not None:
             # Match the base DiT's input: _apply_model feeds it
-            # `calculate_input(t, x)` (for Cosmos RFLOW, x * (1 - σ/(σ+1))).
-            # get_control hands us the *unscaled* noise; scaling it here keeps
-            # the control branch's block-0 fusion consistent with the base model.
+            # calculate_input(t, x), while get_control receives the raw x.
+            # This is an identity for Anima's flow sampling but keeps the
+            # block-0 fusion consistent with the base model in general.
             x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
             x_5d = x_noisy if x_noisy.ndim == 5 else x_noisy.unsqueeze(2)
 
@@ -638,19 +609,3 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
         self.copy_to(c)
         self.copy_to_advanced(c)
         return c
-
-    @staticmethod
-    def from_vanilla(v, timestep_keyframe=None, subtype=None):
-        # VACE checkpoints are never loaded as vanilla ComfyUI objects;
-        # provided for API completeness.
-        if subtype is None:
-            subtype = AnimaVACEAdvanced
-        to_return = subtype(
-            vace_model=v.control_model,
-            timestep_keyframes=timestep_keyframe,
-            load_device=v.load_device,
-            manual_cast_dtype=v.manual_cast_dtype,
-        )
-        v.copy_to(to_return)
-        to_return.control_model_wrapped = v.control_model_wrapped.clone()
-        return to_return
