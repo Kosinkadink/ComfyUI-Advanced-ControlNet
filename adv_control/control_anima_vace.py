@@ -553,13 +553,15 @@ class AnimaVACEAdvanced(ControlNetAdvanced):
 
             hint_mask = self._build_hint_mask(hints)
             # Publish onto the per-run transformer_options (read by the hooks).
+            # A stacked previous VACE control has already published its hints
+            # above, so add to them per block instead of replacing them.
             # mask follows ACN convention: 1 = apply control, 0 = suppress.
-            published = {}
+            published = transformer_options.setdefault(ANIMA_VACE_HINTS_KEY, {})
             for ci, hint in hints.items():
                 if hint_mask is not None:
                     hint = hint * hint_mask
-                published[ci] = self._apply_hint_strengths(hint, batched_number) * self.strength
-            transformer_options[ANIMA_VACE_HINTS_KEY] = published
+                hint = self._apply_hint_strengths(hint, batched_number) * self.strength
+                published[ci] = published[ci] + hint if ci in published else hint
 
         return control_prev
 
