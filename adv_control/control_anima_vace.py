@@ -88,7 +88,9 @@ class VACEControlBlock(nn.Module):
         """
         all_c = []
         if self.block_id == 0:
-            c = self.before_proj(c) + x_base
+            # before_proj is a model-dtype (fp16) Linear; run it in that dtype
+            # and keep the fused residual in x_base's (fp32) dtype.
+            c = self.before_proj(c.to(self.before_proj.weight.dtype)).to(x_base.dtype) + x_base
         elif self.use_after_proj:
             all_c = list(torch.unbind(c))
             c = all_c.pop(-1)
@@ -96,7 +98,10 @@ class VACEControlBlock(nn.Module):
         c = self.block(c, **block_kwargs)
 
         if self.use_after_proj:
-            c_skip = self.after_proj(c)
+            # after_proj is fp16; produce the hint in the residual dtype so the
+            # stacked tensor stays uniform (the hook casts to the base block
+            # dtype anyway).
+            c_skip = self.after_proj(c.to(self.after_proj.weight.dtype)).to(c.dtype)
             all_c = all_c + [c_skip, c]
             c = torch.stack(all_c)
         else:
@@ -234,6 +239,14 @@ class VACEControlNetAnima(nn.Module):
             control_latent = torch.cat([control_latent, zeros_mask], dim=1)
 
         c = self.control_embedder(control_latent)
+
+        # Mirror the base _forward: keep the residual stream in fp32. The
+        # AnimaBlock residual has large values and fp16 accumulation over the
+        # control blocks can overflow; attention/MLP still run in fp16 via the
+        # Block's own compute-dtype handling.
+        if c.dtype == torch.float16:
+            c = c.float()
+            x_base_tokens = x_base_tokens.float()
 
         # AnimaBlock expects rope in the (1, L, 1, 1, 1, D) layout the base
         # DiT's _forward produces. prepare_embedded_sequence returns the raw
