@@ -534,6 +534,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
         if "lllite" in key:
             controlnet_type = ControlWeightType.CONTROLLLLITE
             break
+        # Anima VACE check
+        elif "control_blocks" in key and "after_proj" in key:
+            controlnet_type = ControlWeightType.ANIMA_VACE
+            break
         # SparseCtrl check
         elif "motion_modules" in key:
             has_motion_modules_key = True
@@ -566,6 +570,10 @@ def load_controlnet(ckpt_path, timestep_keyframe: TimestepKeyframeGroup=None, mo
             control = load_svdcontrolnet(ckpt_path, controlnet_data=controlnet_data, timestep_keyframe=timestep_keyframe)
         elif controlnet_type == ControlWeightType.CTRLORA:
             raise Exception("This is a CtrLoRA; use the Load CtrLoRA Model node.")
+        elif controlnet_type == ControlWeightType.ANIMA_VACE:
+            from .control_anima_vace import load_anima_vace
+            control = load_anima_vace(ckpt_path, controlnet_data=controlnet_data, metadata=metadata,
+                                     timestep_keyframe=timestep_keyframe)
     # otherwise, load vanilla ControlNet
     else:
         try:
